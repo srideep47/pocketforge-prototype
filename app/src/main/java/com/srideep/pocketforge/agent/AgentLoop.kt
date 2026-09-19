@@ -1,6 +1,7 @@
 package com.srideep.pocketforge.agent
 
 import android.util.Log
+import com.srideep.pocketforge.engine.mnn.GenerationStats
 import com.srideep.pocketforge.engine.mnn.MnnLlmEngine
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -16,6 +17,20 @@ sealed interface AgentUpdate {
     data class ToolStarted(val name: String, val summary: String) : AgentUpdate
 
     data class ToolFinished(val name: String, val ok: Boolean, val detail: String) : AgentUpdate
+
+    /**
+     * Characters generated so far this turn. A tool call's body is buffered until its
+     * closing tag, so without this the UI shows nothing at all while the model writes a
+     * file — which is most of a run.
+     */
+    data class Progress(val charsGenerated: Int) : AgentUpdate
+
+    /**
+     * MNN's counters for the turn that just finished. Emitted per turn rather than read
+     * once at the end: the counters are per-`response()` call, and the last turn of a run
+     * is a short summary whose throughput is all warm-up overhead.
+     */
+    data class TurnStats(val stats: GenerationStats) : AgentUpdate
 
     /** The dev server came up; the preview tab should point here. */
     data class PreviewReady(val url: String) : AgentUpdate
@@ -43,23 +58,39 @@ class AgentLoop(
     fun run(userMessage: String): Flow<AgentUpdate> = flow {
         val parser = ToolCallParser()
         var prompt = HermesPrompt.firstTurn(userMessage)
+        var malformedRetries = 0
 
         for (iteration in 0 until maxIterations) {
             currentCoroutineContext().ensureActive()
 
             val pending = mutableListOf<ToolCall>()
+            var sawMalformed = false
             parser.reset()
 
+            var streamed = 0
             engine.generate(prompt, maxNewTokensPerTurn).collect { chunk ->
+                streamed += chunk.length
+                emit(AgentUpdate.Progress(streamed))
                 for (event in parser.feed(chunk)) {
+                    if (event is AgentEvent.Malformed) sawMalformed = true
                     emitEvent(event, pending)
                 }
             }
             for (event in parser.finish()) {
+                if (event is AgentEvent.Malformed) sawMalformed = true
                 emitEvent(event, pending)
             }
+            emit(AgentUpdate.TurnStats(engine.lastStats()))
 
             if (pending.isEmpty()) {
+                // A turn that produced a broken call is worth one nudge: the model
+                // usually had the right idea and lost the format, and re-prompting is
+                // far cheaper than making the user retype the task.
+                if (sawMalformed && malformedRetries < 1) {
+                    malformedRetries++
+                    prompt = HermesPrompt.retryAfterMalformed()
+                    continue
+                }
                 emit(AgentUpdate.Done)
                 return@flow
             }

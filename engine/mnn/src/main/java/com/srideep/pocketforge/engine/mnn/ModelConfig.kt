@@ -27,39 +27,68 @@ data class ModelConfig(
     val tokenizerFile: String = "tokenizer.txt",
 
     val backendType: String = "cpu",
-    val threadNum: Int = 6,
+    /**
+     * Four, not eight. MNN splits a layer evenly across threads and then waits for the
+     * slowest, so adding the little cores of a big.LITTLE SoC makes decode slower, not
+     * faster. Four keeps the work on the performance cluster.
+     */
+    val threadNum: Int = 4,
+    /** fp16 compute. */
     val precision: String = "low",
-    val memory: String = "low",
+    /** "high" keeps intermediates resident instead of recomputing them to save RAM. */
+    val memory: String = "high",
     val power: String = "high",
 
     /** Total context window, prompt plus generation. */
     val maxAllTokens: Int = 32_768,
     /** Ceiling on a single reply, so one runaway turn cannot eat the whole window. */
-    val maxNewTokens: Int = 4_096,
+    /**
+     * Deliberately tight. A small model that loses the format loops instead of stopping,
+     * and the only thing a high ceiling buys is a longer wait before we find out.
+     */
+    val maxNewTokens: Int = 2_048,
 
-    val useMmap: Boolean = true,
+    /**
+     * Off by default: mmap pages weights in from UFS on demand, and a decode step that
+     * touches every layer turns that into a storage-bound workload. Loading the weights
+     * resident costs RAM and a slower first load, and is markedly faster per token.
+     * Turn it back on for a model too large to sit in memory.
+     */
+    val useMmap: Boolean = false,
     val useCachedMmap: Boolean = true,
     val reuseKv: Boolean = true,
     /** 10 = INT8 quantised K and V cache. MNN downgrades it to 9 when reuse_kv is on. */
     val attentionMode: Int = 10,
-    /** Spills the KV cache to [tmpDir]; at 32k on a phone this is not optional. */
-    val kvcacheMmap: Boolean = true,
-
-    // Sampling. Low temperature with an active repetition penalty: the agent's output is
-    // JSON tool calls and source code, where creativity is a defect.
-    val temperature: Float = 0.25f,
-    val topP: Float = 0.9f,
-    val topK: Int = 20,
-    val minP: Float = 0.05f,
-    val penalty: Float = 1.05f,
-    val penaltyWindow: Int = 256,
+    /**
+     * Off: a disk-backed KV cache puts a UFS read in the path of every attention step.
+     * MNN grows the cache with the sequence rather than preallocating [maxAllTokens], so
+     * an ordinary agent run stays well inside RAM even with a 32k ceiling.
+     */
+    val kvcacheMmap: Boolean = false,
 
     /**
-     * Qwen3.5 emits a `<think>` block before answering when this is on. For a tool-calling
-     * loop on ~10 tok/s hardware that is a large latency tax for little accuracy, so it is
-     * off by default.
+     * Lookahead speculative decoding drafts tokens from n-grams already seen and verifies
+     * them in one pass, which is a real win on repetitive code.
+     *
+     * Off after measuring it on a Snapdragon 8+ Gen 1 with Qwen3.5-2B: it did not improve
+     * time-to-finish, and turns ran noticeably longer, which is what drafting from
+     * already-seen n-grams does to a model inclined to restate itself. Prefill, not
+     * decode, was the real cost here — see HermesPrompt.
      */
-    val enableThinking: Boolean = false,
+    val speculativeType: String = "",
+    val draftPredictLength: Int = 6,
+    val ngramMatchMaxLen: Int = 4,
+    /** Feed generated tokens back into the n-gram table, not just the prompt. */
+    val ngramUpdate: Boolean = true,
+
+    // Sampling. These are the values the agent loop was first proven against on device.
+    // Lowering the temperature and adding a penalty stage to chase "more deterministic
+    // code" made a 2B fall into degenerate repetition — near-greedy decoding is the
+    // classic trigger — so any change here needs a run on hardware behind it.
+    val temperature: Float = 0.6f,
+    val topP: Float = 0.95f,
+    val topK: Int = 40,
+
 ) {
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -83,22 +112,23 @@ data class ModelConfig(
         put("reuse_kv", reuseKv)
         put("attention_mode", attentionMode)
         put("kvcache_mmap", kvcacheMmap)
+
+        if (speculativeType.isNotBlank()) {
+            put("speculative_type", speculativeType)
+            put("draft_predict_length", draftPredictLength)
+            put("ngram_match_maxlen", ngramMatchMaxLen)
+            put("ngram_update", ngramUpdate)
+            put("draft_match_strictness", "low")
+            put("draft_selection_rule", "freqxlen")
+        }
         // tmp_path is the one path MNN takes verbatim rather than joining to base_dir.
         put("tmp_path", tmpDir.absolutePath)
 
-        put("sampler_type", "mixed")
-        put("mixed_samplers", JSONArray(listOf("penalty", "topK", "topP", "min_p", "temperature")))
+        // No sampler_type override: MNN's default chain is what this loop was proven
+        // against, and forcing "mixed" with a penalty stage is what broke it.
         put("temperature", temperature.toDouble())
         put("topP", topP.toDouble())
         put("topK", topK)
-        put("min_p", minP.toDouble())
-        put("penalty", penalty.toDouble())
-        put("penalty_window", penaltyWindow)
-
-        put(
-            "jinja",
-            JSONObject().put("context", JSONObject().put("enable_thinking", enableThinking)),
-        )
     }
 
     /**

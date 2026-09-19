@@ -12,6 +12,20 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Throughput for the turn that just finished, straight out of MNN's own counters. */
+data class GenerationStats(
+    val promptTokens: Int,
+    val generatedTokens: Int,
+    val prefillMicros: Long,
+    val decodeMicros: Long,
+) {
+    val decodeTokensPerSecond: Double
+        get() = if (decodeMicros <= 0L) 0.0 else generatedTokens * 1_000_000.0 / decodeMicros
+
+    val prefillTokensPerSecond: Double
+        get() = if (prefillMicros <= 0L) 0.0 else promptTokens * 1_000_000.0 / prefillMicros
+}
+
 /**
  * On-device LLM inference over MNN.
  *
@@ -66,6 +80,15 @@ class MnnLlmEngine {
         // at its next token and lets the worker thread return.
         awaitClose { bridge.nativeStopGeneration(current) }
     }.buffer(Channel.UNLIMITED)
+
+    /** Counters for the most recent turn; zeroes before anything has been generated. */
+    fun lastStats(): GenerationStats {
+        val current = handle
+        if (current == 0L) return GenerationStats(0, 0, 0L, 0L)
+        val raw = bridge.nativeLastStats(current)
+        if (raw.size < 4) return GenerationStats(0, 0, 0L, 0L)
+        return GenerationStats(raw[0].toInt(), raw[1].toInt(), raw[2], raw[3])
+    }
 
     /** Asks the running decode loop to stop at its next token. */
     fun stop() {

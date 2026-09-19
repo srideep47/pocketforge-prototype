@@ -72,7 +72,10 @@ class ToolCallParser {
             val leftover = buffer.toString()
             buffer.setLength(0)
             events += if (insideCall) {
-                AgentEvent.Malformed(leftover, "generation ended inside a tool call")
+                // The model stopped before its closing tag, which small models do often.
+                // The body is usually complete bar a brace, so try to parse it anyway
+                // rather than throwing away a turn that took a minute to generate.
+                parseCall(leftover)
             } else {
                 AgentEvent.Text(leftover)
             }

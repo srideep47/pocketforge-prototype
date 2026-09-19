@@ -45,6 +45,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private var nextMessageId = 1L
     private var agentJob: Job? = null
 
+    /** Totals across every turn of one agent run, for the throughput line. */
+    private var runTokens = 0
+    private var runDecodeMicros = 0L
+    private var runPromptTokens = 0
+    private var runPrefillMicros = 0L
+
     /** Downloads in flight, and the id of whatever the engine currently holds. */
     private val downloads = mutableMapOf<String, DownloadProgress>()
     private val downloadJobs = mutableMapOf<String, Job>()
@@ -210,6 +216,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         appendMessage(ChatMessage(id = assistantId, role = Role.ASSISTANT, streaming = true))
         _state.value = _state.value.copy(input = "", isGenerating = true)
 
+        runTokens = 0
+        runDecodeMicros = 0L
+        runPromptTokens = 0
+        runPrefillMicros = 0L
+
         agentJob = viewModelScope.launch {
             try {
                 agent.run(prompt).collect { update -> apply(assistantId, update) }
@@ -218,7 +229,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 updateMessage(assistantId) { it.copy(text = it.text + "\n\n" + e.message) }
             } finally {
                 updateMessage(assistantId) { it.copy(streaming = false) }
-                _state.value = _state.value.copy(isGenerating = false)
+                _state.value = _state.value.copy(
+                    isGenerating = false,
+                    status = throughputSummary(),
+                )
                 refreshFiles()
             }
         }
@@ -253,6 +267,17 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 message.copy(tools = updated)
             }
 
+            is AgentUpdate.TurnStats -> {
+                runTokens += update.stats.generatedTokens
+                runDecodeMicros += update.stats.decodeMicros
+                runPromptTokens += update.stats.promptTokens
+                runPrefillMicros += update.stats.prefillMicros
+            }
+
+            is AgentUpdate.Progress -> _state.value = _state.value.copy(
+                status = "Generating… " + update.charsGenerated + " chars",
+            )
+
             is AgentUpdate.PreviewReady -> _state.value = _state.value.copy(
                 previewUrl = update.url,
                 devServerRunning = true,
@@ -265,6 +290,23 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
             AgentUpdate.Done -> Unit
         }
+    }
+
+    private fun throughputSummary(): String {
+        if (runTokens <= 0 || runDecodeMicros <= 0L) return ""
+        val decode = runTokens * 1_000_000.0 / runDecodeMicros
+        val prefill = if (runPrefillMicros > 0L) {
+            runPromptTokens * 1_000_000.0 / runPrefillMicros
+        } else {
+            0.0
+        }
+        return String.format(
+            java.util.Locale.US,
+            "%.1f tok/s decode · %.0f tok/s prefill · %d tokens generated",
+            decode,
+            prefill,
+            runTokens,
+        )
     }
 
     // --- files -------------------------------------------------------------------

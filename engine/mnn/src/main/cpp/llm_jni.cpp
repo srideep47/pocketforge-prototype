@@ -158,6 +158,28 @@ Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeGenerateStream(
     return session->cancelled.load() ? JNI_FALSE : JNI_TRUE;
 }
 
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeLastStats(
+    JNIEnv* env, jobject, jlong handle) {
+    Session* session = asSession(handle);
+    jlongArray out = env->NewLongArray(4);
+    if (out == nullptr) {
+        return nullptr;
+    }
+    jlong values[4] = {0, 0, 0, 0};
+    if (session != nullptr && session->llm != nullptr) {
+        // MNN keeps per-turn counters on the context; this is the only honest source
+        // of throughput, since wall-clock in Kotlin also measures our own plumbing.
+        const LlmContext* context = session->llm->getContext();
+        values[0] = context->prompt_len;
+        values[1] = context->gen_seq_len;
+        values[2] = context->prefill_us;
+        values[3] = context->decode_us;
+    }
+    env->SetLongArrayRegion(out, 0, 4, values);
+    return out;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeStopGeneration(
     JNIEnv*, jobject, jlong handle) {
