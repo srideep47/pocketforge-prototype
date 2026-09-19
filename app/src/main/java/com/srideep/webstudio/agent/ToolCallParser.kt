@@ -36,9 +36,13 @@ class ToolCallParser {
             if (insideCall) {
                 val end = buffer.indexOf(CLOSE_TAG)
                 if (end < 0) break
-                val body = buffer.substring(0, end)
+                var body = buffer.substring(0, end)
                 buffer.delete(0, end + CLOSE_TAG.length)
                 insideCall = false
+                // Small models re-open the tag before getting to the JSON, often by
+                // parroting the format example. Keep only what follows the last one.
+                val reopened = body.lastIndexOf(OPEN_TAG)
+                if (reopened >= 0) body = body.substring(reopened + OPEN_TAG.length)
                 events += parseCall(body)
             } else {
                 val start = buffer.indexOf(OPEN_TAG)
@@ -83,20 +87,58 @@ class ToolCallParser {
     }
 
     private fun parseCall(body: String): AgentEvent {
-        val json = body.trim().trim('`').removePrefix("json").trim()
-        return try {
-            val obj = JSONObject(json)
-            val name = obj.optString("name")
-            if (name.isBlank()) {
-                AgentEvent.Malformed(body, "tool call has no name")
-            } else {
-                val args = obj.optJSONObject("arguments")
-                    ?: obj.optJSONObject("parameters")
-                    ?: JSONObject()
-                AgentEvent.Call(ToolCall(name, args, body))
+        // Fences, a stray "json" language tag and leading prose all show up here; the
+        // object starts at the first brace.
+        val trimmed = body.trim().trim('`').removePrefix("json").trim()
+        val start = trimmed.indexOf('{')
+        if (start < 0) {
+            return AgentEvent.Malformed(body, "no JSON object in the tool call")
+        }
+
+        val lastBrace = trimmed.lastIndexOf('}')
+        val candidates = buildList {
+            if (lastBrace > start) add(trimmed.substring(start, lastBrace + 1))
+            // A 2B model drops a closing brace often enough to be worth repairing
+            // rather than throwing the whole turn away.
+            add(closeOpenBraces(trimmed.substring(start)))
+        }
+
+        var lastError = "invalid JSON"
+        for (candidate in candidates) {
+            val parsed = runCatching { JSONObject(candidate) }.getOrElse { error ->
+                lastError = error.message ?: "invalid JSON"
+                null
+            } ?: continue
+
+            val name = parsed.optString("name")
+            if (name.isBlank()) return AgentEvent.Malformed(body, "tool call has no name")
+            val args = parsed.optJSONObject("arguments")
+                ?: parsed.optJSONObject("parameters")
+                ?: JSONObject()
+            return AgentEvent.Call(ToolCall(name, args, body))
+        }
+        return AgentEvent.Malformed(body, lastError)
+    }
+
+    /** Appends whatever quote and braces the model left open, so the object parses. */
+    private fun closeOpenBraces(candidate: String): String {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (character in candidate) {
+            when {
+                escaped -> escaped = false
+                inString && character == '\\' -> escaped = true
+                character == '"' -> inString = !inString
+                inString -> Unit
+                character == '{' -> depth++
+                character == '}' -> depth--
             }
-        } catch (e: Exception) {
-            AgentEvent.Malformed(body, e.message ?: "invalid JSON")
+        }
+        return buildString {
+            append(candidate)
+            if (inString) append('"')
+            repeat(maxOf(depth, 0)) { append('}') }
         }
     }
 

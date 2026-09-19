@@ -1,5 +1,6 @@
 package com.srideep.webstudio.agent
 
+import android.util.Log
 import com.srideep.webstudio.engine.mnn.MnnLlmEngine
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -90,7 +91,10 @@ class AgentLoop(
             is AgentEvent.Call -> pending += event.call
             // Show the model's mistake instead of silently dropping the block; it is the
             // single most useful thing to see when a small model drifts off-format.
-            is AgentEvent.Malformed -> emit(AgentUpdate.Failed("bad tool call (${event.reason})"))
+            is AgentEvent.Malformed -> {
+                Log.w(TAG, "malformed tool call (${event.reason}): ${event.raw}")
+                emit(AgentUpdate.Failed("bad tool call (${event.reason})"))
+            }
         }
     }
 
@@ -103,6 +107,7 @@ class AgentLoop(
     }
 
     private companion object {
+        const val TAG = "AgentLoop"
         val PREVIEW_URL = Regex("""http://localhost:\d+""")
     }
 }

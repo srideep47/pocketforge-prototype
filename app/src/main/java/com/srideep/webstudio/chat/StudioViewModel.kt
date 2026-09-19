@@ -92,7 +92,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 status = "Loading " + name,
             )
             val loaded = runCatching {
-                engine.load(ModelConfig(modelDir = File(modelsDir, name)))
+                engine.load(
+                    ModelConfig(
+                        modelDir = File(modelsDir, name),
+                        tmpDir = File(getApplication<Application>().cacheDir, "mnn"),
+                    ),
+                )
             }.getOrElse { error ->
                 Log.e(TAG, "model load failed", error)
                 false

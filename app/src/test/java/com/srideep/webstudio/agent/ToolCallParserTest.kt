@@ -53,4 +53,30 @@ class ToolCallParserTest {
         val text = events.filterIsInstance<AgentEvent.Text>().joinToString("") { it.delta }
         assertEquals("use <tool to build", text)
     }
+
+    @Test
+    fun `repairs a tool call that is missing its closing brace`() {
+        // The shape Qwen3.5-2B produced on device: a complete call whose outer brace
+        // never arrived, with CSS braces inside the content string to trip up any
+        // repair that just counts from the end.
+        val parser = ToolCallParser()
+        val events = parser.feed(
+            "<tool_call>{\"name\": \"create_file\", \"arguments\": {\"path\": \"index.html\", " +
+                "\"content\": \"<style>body { color: #ff0000; }</style><h1>Hello</h1>\"}</tool_call>",
+        )
+
+        val call = events.filterIsInstance<AgentEvent.Call>().single().call
+        assertEquals("create_file", call.name)
+        assertEquals("index.html", call.arguments.getString("path"))
+        assertTrue(call.arguments.getString("content").contains("<h1>Hello</h1>"))
+    }
+
+    @Test
+    fun `recovers when the opening tag is repeated before the json`() {
+        val parser = ToolCallParser()
+        val events = parser.feed(
+            "<tool_call>\n<tool_call>\n{\"name\":\"list_files\",\"arguments\":{}}\n</tool_call>",
+        )
+        assertEquals("list_files", events.filterIsInstance<AgentEvent.Call>().single().call.name)
+    }
 }

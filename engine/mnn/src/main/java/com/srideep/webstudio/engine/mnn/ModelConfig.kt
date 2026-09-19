@@ -13,6 +13,12 @@ import org.json.JSONObject
 data class ModelConfig(
     /** Directory holding the exported MNN model (llm.mnn, tokenizer.txt, ...). */
     val modelDir: File,
+    /**
+     * Scratch directory for mmap'd KV cache. Kept off the model directory on purpose:
+     * models usually sit on the FUSE-backed external volume, which is a poor host for
+     * a file the runtime maps and writes to.
+     */
+    val tmpDir: File = File(modelDir, "tmp"),
     val llmModel: String = "llm.mnn",
     val llmWeight: String = "llm.mnn.weight",
     val tokenizerFile: String = "tokenizer.txt",
@@ -31,15 +37,18 @@ data class ModelConfig(
 ) {
 
     fun toJson(): JSONObject = JSONObject().apply {
-        put("llm_model", File(modelDir, llmModel).absolutePath)
-        put("llm_weight", File(modelDir, llmWeight).absolutePath)
-        put("tokenizer_file", File(modelDir, tokenizerFile).absolutePath)
+        // MNN resolves these by concatenating its base_dir (the config file's own
+        // directory) with the value, so they must stay bare file names.
+        put("llm_model", llmModel)
+        put("llm_weight", llmWeight)
+        put("tokenizer_file", tokenizerFile)
         put("backend_type", backendType)
         put("thread_num", threadNum)
         put("precision", precision)
         put("memory", memory)
         put("use_mmap", useMmap)
-        put("tmp_path", File(modelDir, "tmp").absolutePath)
+        // tmp_path is the one path MNN takes verbatim.
+        put("tmp_path", tmpDir.absolutePath)
         put("reuse_kv", reuseKv)
         put("attention_mode", attentionMode)
         put("max_new_tokens", maxNewTokens)
@@ -53,7 +62,7 @@ data class ModelConfig(
      * The scratch directory mmap uses is created here too, since MNN expects it to exist.
      */
     fun writeTo(target: File = File(modelDir, "webstudio_config.json")): File {
-        File(modelDir, "tmp").mkdirs()
+        tmpDir.mkdirs()
         target.writeText(toJson().toString(2))
         return target
     }
