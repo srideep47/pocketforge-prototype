@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!--
+          The Node runtime lives in its own process. node::Start() never returns and a
+          crash inside V8 takes the whole process down, so keeping it out of :main means
+          a broken dev server can never take the UI or the loaded LLM with it.
+        -->
+        <service
+            android:name="com.srideep.webstudio.runtime.node.NodeService"
+            android:exported="false"
+            android:process=":node" />
+    </application>
+
+</manifest>
