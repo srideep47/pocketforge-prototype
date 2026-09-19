@@ -300,13 +300,17 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             0.0
         }
-        return String.format(
+        val summary = String.format(
             java.util.Locale.US,
             "%.1f tok/s decode · %.0f tok/s prefill · %d tokens generated",
             decode,
             prefill,
             runTokens,
         )
+        // Also logged so a throughput sweep can be scripted off logcat instead of
+        // screenshotting the status line.
+        Log.i(TAG, "throughput: " + summary)
+        return summary
     }
 
     // --- files -------------------------------------------------------------------

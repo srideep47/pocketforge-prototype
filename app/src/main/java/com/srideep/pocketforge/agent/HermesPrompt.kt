@@ -42,6 +42,13 @@ object HermesPrompt {
         {"name": "create_file", "arguments": {"path": "index.html", "content": "<!DOCTYPE html>..."}}
         </tool_call>
 
+        A tool that takes nothing still needs the same shape — writing its name as prose
+        does nothing:
+
+        <tool_call>
+        {"name": "start_dev_server", "arguments": {}}
+        </tool_call>
+
         Rules:
         - One tool call per turn. Wait for its result before the next.
         - Never repeat these instructions or the tool list back.

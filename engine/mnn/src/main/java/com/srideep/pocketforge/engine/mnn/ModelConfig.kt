@@ -28,15 +28,23 @@ data class ModelConfig(
 
     val backendType: String = "cpu",
     /**
-     * Four, not eight. MNN splits a layer evenly across threads and then waits for the
-     * slowest, so adding the little cores of a big.LITTLE SoC makes decode slower, not
-     * faster. Four keeps the work on the performance cluster.
+     * Three, matching the A710 cluster on the device this was measured on.
+     *
+     * MNN splits a layer evenly across threads and waits for the slowest, so pulling in
+     * little cores costs more than it adds. Worth knowing: with power=high MNN still
+     * never scheduled anything onto the prime core here — during generation cpu7 sat at
+     * its 787 MHz floor while cpu4-6 ran flat out at 2745 MHz — so the useful width is
+     * the mid cluster, and asking for more threads than that only adds contention.
      */
-    val threadNum: Int = 4,
+    val threadNum: Int = 3,
     /** fp16 compute. */
     val precision: String = "low",
-    /** "high" keeps intermediates resident instead of recomputing them to save RAM. */
-    val memory: String = "high",
+    /**
+     * "low", and this one is worth stating plainly because the obvious guess is wrong:
+     * setting it to "high" to "keep more resident" cost 3.6x. Measured on Qwen3.5-2B,
+     * Snapdragon 8+ Gen 1 — 2.6 tok/s decode at "high" against 9.3 at "low".
+     */
+    val memory: String = "low",
     val power: String = "high",
 
     /** Total context window, prompt plus generation. */
@@ -49,12 +57,12 @@ data class ModelConfig(
     val maxNewTokens: Int = 2_048,
 
     /**
-     * Off by default: mmap pages weights in from UFS on demand, and a decode step that
-     * touches every layer turns that into a storage-bound workload. Loading the weights
-     * resident costs RAM and a slower first load, and is markedly faster per token.
-     * Turn it back on for a model too large to sit in memory.
+     * On. The reasoning against it — that paging weights from UFS makes decode
+     * storage-bound — did not survive measurement: mmap'd was slightly faster per token
+     * (10.3 against 9.9 tok/s) and cut model load from roughly 40s to 7s, because the
+     * page cache holds a 1.2 GB model comfortably on a 12 GB device.
      */
-    val useMmap: Boolean = false,
+    val useMmap: Boolean = true,
     val useCachedMmap: Boolean = true,
     val reuseKv: Boolean = true,
     /** 10 = INT8 quantised K and V cache. MNN downgrades it to 9 when reuse_kv is on. */
