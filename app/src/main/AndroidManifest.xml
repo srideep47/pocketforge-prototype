@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Binding the dev server's loopback socket needs this; nothing here talks off-device. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Dictation in the chat input bar. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- The on-device recognizer lives in another app. -->
