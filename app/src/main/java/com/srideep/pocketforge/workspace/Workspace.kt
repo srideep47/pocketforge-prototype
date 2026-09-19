@@ -103,5 +103,19 @@ class Workspace(val root: File) {
 
     fun createDirectory(relativePath: String): File = resolve(relativePath).apply { mkdirs() }
 
+    /**
+     * Renames or moves an entry. Both ends go through [resolve], so a destination that
+     * climbs out of the project is refused the same way a read would be.
+     */
+    fun rename(fromPath: String, toPath: String): File {
+        val source = resolve(fromPath)
+        if (!source.exists()) throw IOException("no such file: $fromPath")
+        val destination = resolve(toPath)
+        if (destination.exists()) throw IOException("already exists: $toPath")
+        destination.parentFile?.mkdirs()
+        if (!source.renameTo(destination)) throw IOException("could not rename $fromPath")
+        return destination
+    }
+
     fun exists(relativePath: String): Boolean = resolve(relativePath).exists()
 }

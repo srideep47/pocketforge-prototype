@@ -9,6 +9,9 @@ import com.srideep.pocketforge.agent.AgentTools
 import com.srideep.pocketforge.agent.AgentUpdate
 import com.srideep.pocketforge.engine.mnn.MnnLlmEngine
 import com.srideep.pocketforge.engine.mnn.ModelConfig
+import com.srideep.pocketforge.model.CatalogModel
+import com.srideep.pocketforge.model.DownloadProgress
+import com.srideep.pocketforge.model.ModelDownloader
 import com.srideep.pocketforge.runtime.node.DevServerClient
 import com.srideep.pocketforge.voice.SpeechToText
 import com.srideep.pocketforge.workspace.ProjectTemplates
@@ -42,9 +45,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private var nextMessageId = 1L
     private var agentJob: Job? = null
 
+    /** Downloads in flight, and the id of whatever the engine currently holds. */
+    private val downloads = mutableMapOf<String, DownloadProgress>()
+    private val downloadJobs = mutableMapOf<String, Job>()
+    private var loadedModelId: String? = null
+
     /** Where a model directory is expected: /Android/data/&lt;pkg&gt;/files/models/&lt;name&gt;. */
     private val modelsDir: File =
         File(application.getExternalFilesDir(null) ?: application.filesDir, "models")
+    private val downloader = ModelDownloader(modelsDir)
 
     init {
         modelsDir.mkdirs()
@@ -68,33 +77,93 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     // --- model -------------------------------------------------------------------
 
     fun refreshModels() {
-        val models = modelsDir.listFiles()
-            .orEmpty()
-            .filter { it.isDirectory && File(it, "llm.mnn").isFile }
-            .map { it.name }
-            .sorted()
-        _state.value = _state.value.copy(
-            availableModels = models,
-            modelStatus = if (models.isEmpty()) ModelStatus.MISSING else _state.value.modelStatus,
-            status = if (models.isEmpty()) {
-                "Put an exported MNN model in " + modelsDir.absolutePath + "/<name>/"
-            } else {
-                _state.value.status
-            },
+        _state.value = _state.value.copy(models = catalogEntries())
+    }
+
+    /** Rebuilds the menu rows from disk, preserving any download in flight. */
+    private fun catalogEntries(): List<ModelEntry> = CatalogModel.entries.map { model ->
+        val inFlight = downloads[model.id]
+        val state = when {
+            inFlight != null -> ModelInstallState.DOWNLOADING
+            model.id == loadedModelId -> ModelInstallState.LOADED
+            model.isInstalledIn(modelsDir) -> ModelInstallState.DOWNLOADED
+            else -> ModelInstallState.NOT_DOWNLOADED
+        }
+        ModelEntry(
+            id = model.id,
+            displayName = model.displayName,
+            subtitle = model.subtitle,
+            approxBytes = model.approxBytes,
+            state = state,
+            progress = inFlight?.fraction ?: 0f,
+            progressLabel = inFlight?.let { progress ->
+                humanSize(progress.bytesDone) + " of " + humanSize(progress.bytesTotal)
+            }.orEmpty(),
         )
     }
 
-    fun loadModel(name: String) {
+    fun downloadModel(id: String) {
+        val model = CatalogModel.byId(id) ?: return
+        if (downloadJobs.containsKey(id)) return
+
+        downloads[id] = DownloadProgress(id, "", 0L, model.approxBytes)
+        refreshModels()
+
+        downloadJobs[id] = viewModelScope.launch {
+            try {
+                downloader.download(model).collect { progress ->
+                    downloads[id] = progress
+                    refreshModels()
+                }
+                downloads.remove(id)
+                downloadJobs.remove(id)
+                refreshModels()
+                _state.value = _state.value.copy(status = model.displayName + " downloaded")
+            } catch (e: Exception) {
+                Log.e(TAG, "download failed for " + id, e)
+                downloads.remove(id)
+                downloadJobs.remove(id)
+                refreshModels()
+                _state.value = _state.value.copy(
+                    status = "Download failed: " + (e.message ?: "unknown error"),
+                )
+            }
+        }
+    }
+
+    fun cancelDownload(id: String) {
+        downloadJobs.remove(id)?.cancel()
+        downloads.remove(id)
+        refreshModels()
+        _state.value = _state.value.copy(status = "Download paused")
+    }
+
+    /** Frees the disk a model takes. Partial downloads resume, so this is the way out. */
+    fun deleteModel(id: String) {
+        val model = CatalogModel.byId(id) ?: return
+        cancelDownload(id)
+        if (loadedModelId == model.id) {
+            loadedModelId = null
+            viewModelScope.launch { engine.release() }
+            _state.value = _state.value.copy(modelStatus = ModelStatus.MISSING, modelName = null)
+        }
+        downloader.delete(model)
+        refreshModels()
+        _state.value = _state.value.copy(status = model.displayName + " removed")
+    }
+
+    fun loadModel(id: String) {
+        val model = CatalogModel.byId(id) ?: return
         viewModelScope.launch {
             _state.value = _state.value.copy(
                 modelStatus = ModelStatus.LOADING,
-                modelName = name,
-                status = "Loading " + name,
+                modelName = model.displayName,
+                status = "Loading " + model.displayName,
             )
             val loaded = runCatching {
                 engine.load(
                     ModelConfig(
-                        modelDir = File(modelsDir, name),
+                        modelDir = model.directoryIn(modelsDir),
                         tmpDir = File(getApplication<Application>().cacheDir, "mnn"),
                     ),
                 )
@@ -102,11 +171,24 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 Log.e(TAG, "model load failed", error)
                 false
             }
+            loadedModelId = if (loaded) model.id else null
             _state.value = _state.value.copy(
                 modelStatus = if (loaded) ModelStatus.READY else ModelStatus.FAILED,
-                status = if (loaded) name + " ready" else "Could not load " + name,
+                status = if (loaded) {
+                    model.displayName + " ready · 32k context"
+                } else {
+                    "Could not load " + model.displayName
+                },
             )
+            refreshModels()
         }
+    }
+
+    /** Megabytes until a download is big enough for gigabytes to mean anything. */
+    private fun humanSize(bytes: Long): String = if (bytes < 1_000_000_000L) {
+        String.format(java.util.Locale.US, "%d MB", bytes / 1_000_000L)
+    } else {
+        String.format(java.util.Locale.US, "%.2f GB", bytes / 1_000_000_000.0)
     }
 
     // --- chat --------------------------------------------------------------------
@@ -222,6 +304,24 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             .onFailure { appendSystem("Could not create " + path + ": " + it.message) }
         refreshFiles()
         openFile(path)
+    }
+
+    fun createFolder(path: String) {
+        if (path.isBlank()) return
+        runCatching { workspace.createDirectory(path) }
+            .onFailure { appendSystem("Could not create " + path + ": " + it.message) }
+        refreshFiles()
+    }
+
+    fun renameFile(from: String, to: String) {
+        runCatching { workspace.rename(from, to) }
+            .onSuccess {
+                // Keep the editor pointed at the file the user is looking at.
+                if (_state.value.openFile?.path == from) openFile(to)
+                _state.value = _state.value.copy(status = "Renamed to " + to)
+            }
+            .onFailure { appendSystem("Could not rename " + from + ": " + it.message) }
+        refreshFiles()
     }
 
     fun deleteFile(path: String) {

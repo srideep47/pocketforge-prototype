@@ -9,10 +9,10 @@ Prototype. arm64 only, `minSdk 29`, targets Android 15 (API 35).
 
 | | |
 |---|---|
-| **Local inference** | Alibaba MNN runs a quantised Qwen 2.5/3.x checkpoint through a small JNI bridge. Tokens come back as a `Flow<String>`. |
+| **Local inference** | Alibaba MNN runs a quantised Qwen 3.5 checkpoint through a small JNI bridge, with a 32k context. Tokens come back as a `Flow<String>`. |
 | **Chat + dictation** | Compose chat with Markdown rendering. The mic button transcribes into the input field with Android's `SpeechRecognizer` (offline where the device supports it) — no TTS, no playback, no always-on listening. |
 | **Web dev environment** | Node 18 (nodejs-mobile) in an isolated `:node` process serving the project over HTTP on `localhost:5173`, with live reload on file change. |
-| **Mini IDE** | A drawer listing every project file, a monospace editor, and create/read/update/delete. |
+| **Mini IDE** | A collapsible project tree with create, rename, delete, and a monospace editor. |
 | **Autonomous agent** | A Hermes-format tool-calling loop: the model creates files, edits them, starts the dev server, and the preview tab follows along. |
 
 Tools the agent can call: `create_file`, `edit_file`, `read_file`, `list_files`,
@@ -54,18 +54,30 @@ Three prebuilt artifacts are checked in under the modules that consume them:
 They must stay in step with each other; `libMNN.so` and the `mnnSourceRoot` headers in
 particular are one unit.
 
-## Installing a model
+## Models
 
-Push an MNN-exported model into the app's external files directory, one directory per
-model:
+Two are offered in-app, downloaded from HuggingFace on first use and cached on the
+device afterwards:
 
-```bash
-adb push Qwen2.5-1.5B-Instruct-MNN /sdcard/Android/data/com.srideep.pocketforge/files/models/
-```
+| | Size | Notes |
+|---|---|---|
+| `taobao-mnn/Qwen3.5-2B-MNN` | ~1.4 GB | Fast; leaves room for the dev server alongside it. |
+| `taobao-mnn/Qwen3.5-4B-MNN` | ~2.8 GB | Better code, fewer malformed tool calls. |
 
-A directory is offered in the model menu when it contains `llm.mnn`. The runtime config is
-written at load time (`use_mmap`, `reuse_kv`, `attention_mode = 10` for the INT8 QKV
-cache) — see `ModelConfig`.
+Downloads resume per file, so a dropped connection costs only the file in flight. Both
+exports are multimodal and MNN refuses to load without the `visual.mnn` pair, so it is
+fetched even though only the text path is used today.
+
+The runtime config is written at load time — see `ModelConfig`. It is tuned for a coding
+agent rather than for chat:
+
+- `max_all_tokens = 32768`, `max_new_tokens = 4096`
+- `temperature 0.25`, `topP 0.9`, `topK 20`, `min_p 0.05`, `penalty 1.05` over a 256-token
+  window — the output is JSON tool calls and source code, where sampling variety is a defect
+- `use_mmap`, `use_cached_mmap`, `reuse_kv`, `attention_mode = 10` (INT8 KV cache)
+- `kvcache_mmap = true`, spilling the cache to the app cache directory; at 32k on a phone
+  that is not optional
+- thinking off: a `<think>` block before every tool call is a large latency tax at ~10 tok/s
 
 ## Notes
 

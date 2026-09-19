@@ -55,11 +55,16 @@ class StudioActions(
     val onEditorChange: (String) -> Unit,
     val onSaveFile: () -> Unit,
     val onCreateFile: (String) -> Unit,
+    val onCreateFolder: (String) -> Unit,
+    val onRenameFile: (String, String) -> Unit,
     val onDeleteFile: (String) -> Unit,
     val onRefreshFiles: () -> Unit,
     val onStartServer: () -> Unit,
     val onStopServer: () -> Unit,
     val onLoadModel: (String) -> Unit,
+    val onDownloadModel: (String) -> Unit,
+    val onCancelDownload: (String) -> Unit,
+    val onDeleteModel: (String) -> Unit,
     val onRefreshModels: () -> Unit,
 )
 
@@ -83,7 +88,9 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                         tab = StudioTab.CODE.ordinal
                         scope.launch { drawerState.close() }
                     },
-                    onCreate = actions.onCreateFile,
+                    onCreateFile = actions.onCreateFile,
+                    onCreateFolder = actions.onCreateFolder,
+                    onRename = actions.onRenameFile,
                     onDelete = actions.onDeleteFile,
                     onRefresh = actions.onRefreshFiles,
                 )
@@ -126,26 +133,6 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                             )
-                        }
-                        DropdownMenu(
-                            expanded = modelMenuOpen,
-                            onDismissRequest = { modelMenuOpen = false },
-                        ) {
-                            if (state.availableModels.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("No models found") },
-                                    onClick = { modelMenuOpen = false },
-                                )
-                            }
-                            state.availableModels.forEach { name ->
-                                DropdownMenuItem(
-                                    text = { Text(name) },
-                                    onClick = {
-                                        modelMenuOpen = false
-                                        actions.onLoadModel(name)
-                                    },
-                                )
-                            }
                         }
                     },
                 )
@@ -203,5 +190,19 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                 }
             }
         }
+    }
+
+    if (modelMenuOpen) {
+        ModelSheet(
+            models = state.models,
+            onDownload = actions.onDownloadModel,
+            onCancel = actions.onCancelDownload,
+            onLoad = { id ->
+                modelMenuOpen = false
+                actions.onLoadModel(id)
+            },
+            onDelete = actions.onDeleteModel,
+            onDismiss = { modelMenuOpen = false },
+        )
     }
 }

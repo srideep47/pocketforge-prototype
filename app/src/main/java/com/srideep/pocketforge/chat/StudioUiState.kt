@@ -22,6 +22,19 @@ data class ChatMessage(
 
 enum class ModelStatus { MISSING, LOADING, READY, FAILED }
 
+/** Where one catalog model stands, from the model sheet's point of view. */
+enum class ModelInstallState { NOT_DOWNLOADED, DOWNLOADING, DOWNLOADED, LOADED }
+
+data class ModelEntry(
+    val id: String,
+    val displayName: String,
+    val subtitle: String,
+    val approxBytes: Long,
+    val state: ModelInstallState,
+    val progress: Float = 0f,
+    val progressLabel: String = "",
+)
+
 /** The file currently open in the editor tab. */
 data class OpenFile(
     val path: String,
@@ -36,7 +49,7 @@ data class StudioUiState(
     val isListening: Boolean = false,
     val modelStatus: ModelStatus = ModelStatus.MISSING,
     val modelName: String? = null,
-    val availableModels: List<String> = emptyList(),
+    val models: List<ModelEntry> = emptyList(),
     val files: List<WorkspaceEntry> = emptyList(),
     val openFile: OpenFile? = null,
     val previewUrl: String? = null,
