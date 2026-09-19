@@ -1,0 +1,95 @@
+package com.srideep.pocketforge.engine.mnn
+
+import java.io.File
+import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * On-device LLM inference over MNN.
+ *
+ * The native runtime is not thread safe, so every native call is confined to a single
+ * worker thread. [generate] returns a cold [Flow] that runs one generation per collection
+ * and cancels the native decode loop when the collector goes away.
+ */
+class MnnLlmEngine {
+
+    private val bridge = MnnLlmBridge()
+    private val worker = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "mnn-llm").apply { priority = Thread.MAX_PRIORITY }
+    }
+    private val dispatcher: CoroutineDispatcher = worker.asCoroutineDispatcher()
+
+    @Volatile
+    private var handle: Long = 0L
+
+    val isLoaded: Boolean get() = handle != 0L
+
+    /** Loads a model directory. Returns false if MNN could not create or load the model. */
+    suspend fun load(config: ModelConfig): Boolean = withContext(dispatcher) {
+        require(config.modelDir.isDirectory) { "model dir not found: ${config.modelDir}" }
+        releaseBlocking()
+        MnnLlmBridge.ensureNativeLibraryLoaded()
+        val configFile: File = config.writeTo()
+        handle = bridge.nativeInitModel(configFile.absolutePath)
+        handle != 0L
+    }
+
+    /**
+     * Streams the reply to [prompt]. The prompt is passed through verbatim: chat and tool
+     * framing is the caller's concern, the model's own chat template is applied by MNN.
+     */
+    fun generate(prompt: String, maxNewTokens: Int = -1): Flow<String> = callbackFlow {
+        val current = handle
+        check(current != 0L) { "no model loaded" }
+
+        val callback = MnnLlmBridge.TokenCallback { token -> trySend(token) }
+
+        // The native call blocks its thread for the whole decode, so it gets the worker
+        // thread to itself while this coroutine stays free to observe cancellation.
+        launch(dispatcher) {
+            try {
+                bridge.nativeGenerateStream(current, prompt, maxNewTokens, callback)
+            } finally {
+                close()
+            }
+        }
+
+        // Cancelling the collector flips the native stop flag, which ends the decode loop
+        // at its next token and lets the worker thread return.
+        awaitClose { bridge.nativeStopGeneration(current) }
+    }.buffer(Channel.UNLIMITED)
+
+    /** Asks the running decode loop to stop at its next token. */
+    fun stop() {
+        val current = handle
+        if (current != 0L) bridge.nativeStopGeneration(current)
+    }
+
+    /** Drops KV cache and conversation history without unloading the weights. */
+    suspend fun resetHistory() = withContext(dispatcher) {
+        val current = handle
+        if (current != 0L) bridge.nativeResetHistory(current)
+    }
+
+    suspend fun release() = withContext(dispatcher) { releaseBlocking() }
+
+    private fun releaseBlocking() {
+        val current = handle
+        if (current != 0L) {
+            handle = 0L
+            bridge.nativeReleaseModel(current)
+        }
+    }
+
+    fun shutdown() {
+        worker.shutdown()
+    }
+}

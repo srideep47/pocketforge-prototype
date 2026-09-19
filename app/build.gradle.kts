@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.srideep.webstudio"
+    namespace = "com.srideep.pocketforge"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.srideep.webstudio"
+        applicationId = "com.srideep.pocketforge"
         minSdk = 29
         targetSdk = 35
         versionCode = 1

@@ -13,7 +13,7 @@
 
 #include "node.h"
 
-#define LOG_TAG "WebStudioNode"
+#define LOG_TAG "PocketForgeNode"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
@@ -37,7 +37,7 @@ void pumpToLogcat() {
 }  // namespace
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_srideep_webstudio_runtime_node_NodeRuntime_nativeRedirectOutput(JNIEnv*, jclass) {
+Java_com_srideep_pocketforge_runtime_node_NodeRuntime_nativeRedirectOutput(JNIEnv*, jclass) {
     if (g_redirected) {
         return;
     }
@@ -54,7 +54,7 @@ Java_com_srideep_webstudio_runtime_node_NodeRuntime_nativeRedirectOutput(JNIEnv*
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_srideep_webstudio_runtime_node_NodeRuntime_nativeStart(
+Java_com_srideep_pocketforge_runtime_node_NodeRuntime_nativeStart(
     JNIEnv* env, jclass, jobjectArray jArgs) {
     const jint argc = env->GetArrayLength(jArgs);
 

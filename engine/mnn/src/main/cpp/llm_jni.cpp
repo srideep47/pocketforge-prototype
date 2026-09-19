@@ -16,7 +16,7 @@
 
 #include "llm/llm.hpp"
 
-#define LOG_TAG "WebStudioLlm"
+#define LOG_TAG "PocketForgeLlm"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
@@ -103,7 +103,7 @@ std::string toStdString(JNIEnv* env, jstring value) {
 }  // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_srideep_webstudio_engine_mnn_MnnLlmBridge_nativeInitModel(
+Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeInitModel(
     JNIEnv* env, jobject, jstring jConfigPath) {
     const std::string configPath = toStdString(env, jConfigPath);
     LOGI("loading model config %s", configPath.c_str());
@@ -125,7 +125,7 @@ Java_com_srideep_webstudio_engine_mnn_MnnLlmBridge_nativeInitModel(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_srideep_webstudio_engine_mnn_MnnLlmBridge_nativeGenerateStream(
+Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeGenerateStream(
     JNIEnv* env, jobject, jlong handle, jstring jPrompt, jint maxNewTokens, jobject callback) {
     Session* session = asSession(handle);
     if (session == nullptr || session->llm == nullptr || callback == nullptr) {
@@ -159,7 +159,7 @@ Java_com_srideep_webstudio_engine_mnn_MnnLlmBridge_nativeGenerateStream(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_srideep_webstudio_engine_mnn_MnnLlmBridge_nativeStopGeneration(
+Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeStopGeneration(
     JNIEnv*, jobject, jlong handle) {
     Session* session = asSession(handle);
     if (session == nullptr || session->llm == nullptr) {
@@ -172,7 +172,7 @@ Java_com_srideep_webstudio_engine_mnn_MnnLlmBridge_nativeStopGeneration(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_srideep_webstudio_engine_mnn_MnnLlmBridge_nativeResetHistory(
+Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeResetHistory(
     JNIEnv*, jobject, jlong handle) {
     Session* session = asSession(handle);
     if (session == nullptr || session->llm == nullptr) {
@@ -183,7 +183,7 @@ Java_com_srideep_webstudio_engine_mnn_MnnLlmBridge_nativeResetHistory(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_srideep_webstudio_engine_mnn_MnnLlmBridge_nativeReleaseModel(
+Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeReleaseModel(
     JNIEnv*, jobject, jlong handle) {
     Session* session = asSession(handle);
     if (session == nullptr) {

@@ -20,7 +20,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "WebStudio"
+rootProject.name = "PocketForge"
 
 include(":app")
 include(":engine:mnn")

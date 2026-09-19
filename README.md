@@ -1,4 +1,4 @@
-# Web Studio
+# PocketForge
 
 An on-device web development studio for Android. A local LLM writes the site, a local
 Node runtime serves it, and a WebView previews it — all on the phone, with no network.
@@ -60,7 +60,7 @@ Push an MNN-exported model into the app's external files directory, one director
 model:
 
 ```bash
-adb push Qwen2.5-1.5B-Instruct-MNN /sdcard/Android/data/com.srideep.webstudio/files/models/
+adb push Qwen2.5-1.5B-Instruct-MNN /sdcard/Android/data/com.srideep.pocketforge/files/models/
 ```
 
 A directory is offered in the model menu when it contains `llm.mnn`. The runtime config is

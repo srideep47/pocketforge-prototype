@@ -8,7 +8,7 @@
           a broken dev server can never take the UI or the loaded LLM with it.
         -->
         <service
-            android:name="com.srideep.webstudio.runtime.node.NodeService"
+            android:name="com.srideep.pocketforge.runtime.node.NodeService"
             android:exported="false"
             android:process=":node" />
     </application>

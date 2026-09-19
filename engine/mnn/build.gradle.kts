@@ -9,7 +9,7 @@ val mnnSourceRoot: String = (project.findProperty("mnnSourceRoot") as? String)
     ?: error("Set mnnSourceRoot in gradle.properties (path to the MNN framework checkout)")
 
 android {
-    namespace = "com.srideep.webstudio.engine.mnn"
+    namespace = "com.srideep.pocketforge.engine.mnn"
     compileSdk = 35
 
     defaultConfig {

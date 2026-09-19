@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.srideep.webstudio.runtime.node"
+    namespace = "com.srideep.pocketforge.runtime.node"
     compileSdk = 35
 
     defaultConfig {

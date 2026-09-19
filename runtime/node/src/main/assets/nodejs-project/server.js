@@ -38,7 +38,7 @@ const MIME_TYPES = {
 const LIVE_RELOAD_SNIPPET = `
 <script>
 (function () {
-  var source = new EventSource('/__webstudio/reload');
+  var source = new EventSource('/__pocketforge/reload');
   source.onmessage = function () { window.location.reload(); };
   source.onerror = function () { setTimeout(function () { window.location.reload(); }, 2000); };
 })();
@@ -83,7 +83,7 @@ function resolveRequestPath(urlPath) {
 }
 
 const server = http.createServer((req, res) => {
-  if (req.url.startsWith('/__webstudio/reload')) {
+  if (req.url.startsWith('/__pocketforge/reload')) {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -160,9 +160,9 @@ setInterval(() => {
 }, POLL_INTERVAL_MS).unref();
 
 server.listen(port, '127.0.0.1', () => {
-  console.log('[webstudio] serving ' + projectRoot + ' on http://localhost:' + port);
+  console.log('[pocketforge] serving ' + projectRoot + ' on http://localhost:' + port);
 });
 
 server.on('error', (error) => {
-  console.error('[webstudio] server error: ' + error.message);
+  console.error('[pocketforge] server error: ' + error.message);
 });
