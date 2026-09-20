@@ -33,4 +33,18 @@ class SiteArtifactTest {
     fun `rejects prose`() {
         assertNull(SiteArtifact.extract("I would build a nice site."))
     }
+
+    @Test
+    fun `makes generated site self contained and responsive`() {
+        val result = SiteArtifact.extract(
+            """<site><!doctype html><html><head>
+                <link rel="stylesheet" href="style.css">
+                <script src="app.js"></script>
+                </head><body>Hello</body></html></site>""",
+        )!!
+
+        assertEquals(false, result.contains("style.css"))
+        assertEquals(false, result.contains("app.js"))
+        assertEquals(true, result.contains("name=\"viewport\""))
+    }
 }

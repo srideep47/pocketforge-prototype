@@ -66,6 +66,16 @@ object SiteArtifact {
     private val OPEN = Regex("<site(?:\\s[^>]*)?>", RegexOption.IGNORE_CASE)
     private val CLOSE = Regex("</site>", RegexOption.IGNORE_CASE)
     private val FENCE = Regex("```(?:html)?\\s*([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
+    private val LINK = Regex("<link\\b[^>]*>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val SCRIPT_SRC = Regex(
+        "<script\\b(?=[^>]*\\bsrc\\s*=)[^>]*>.*?</script\\s*>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+    private val VIEWPORT = Regex(
+        "<meta\\b(?=[^>]*\\bname\\s*=\\s*['\"]viewport['\"])[^>]*>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+    private val HEAD_END = Regex("</head\\s*>", RegexOption.IGNORE_CASE)
 
     fun extract(raw: String): String? {
         val open = OPEN.find(raw)
@@ -78,9 +88,23 @@ object SiteArtifact {
                 val htmlEnd = raw.indexOf("</html>", start, ignoreCase = true)
                 if (htmlEnd < 0) return null else raw.substring(start, htmlEnd + "</html>".length)
             }
-            return candidate.trim().takeIf(::looksLikeHtml)
+            return candidate.trim().takeIf(::looksLikeHtml)?.let(::makeSelfContained)
         }
         return FENCE.find(raw)?.groupValues?.get(1)?.trim()?.takeIf(::looksLikeHtml)
+            ?.let(::makeSelfContained)
+    }
+
+    /** The preview is offline and an artifact owns one file, so linked dependencies cannot work. */
+    private fun makeSelfContained(value: String): String {
+        var html = LINK.replace(value, "")
+        html = SCRIPT_SRC.replace(html, "")
+        if (!VIEWPORT.containsMatchIn(html)) {
+            html = HEAD_END.replaceFirst(
+                html,
+                "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n</head>",
+            )
+        }
+        return html.trim()
     }
 
     private fun looksLikeHtml(value: String): Boolean =
