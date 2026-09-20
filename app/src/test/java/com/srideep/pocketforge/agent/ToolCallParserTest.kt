@@ -81,6 +81,41 @@ class ToolCallParserTest {
     }
 
     @Test
+    fun `normalizes qwen argument records`() {
+        val parser = ToolCallParser()
+        val events = parser.feed(
+            """<tool_call>{"name":"create_file","arguments":[{"argument_name":"path","argument_value":"index.html"},{"argument_name":"content","argument_value":"<h1>Hello</h1>"}]}</tool_call>""",
+        )
+        val call = events.filterIsInstance<AgentEvent.Call>().single().call
+        assertEquals("create_file", call.name)
+        assertEquals("index.html", call.arguments.getString("path"))
+        assertEquals("<h1>Hello</h1>", call.arguments.getString("content"))
+    }
+
+    @Test
+    fun `unwraps qwen call tool envelope`() {
+        val parser = ToolCallParser()
+        val events = parser.feed(
+            """<tool_call>{"name":"call_tool","arguments":{"tool_name":"create_file","tool_arguments":{"path":"index.html","content":"hello"}}}</tool_call>""",
+        )
+        val call = events.filterIsInstance<AgentEvent.Call>().single().call
+        assertEquals("create_file", call.name)
+        assertEquals("index.html", call.arguments.getString("path"))
+        assertEquals("hello", call.arguments.getString("content"))
+    }
+
+    @Test
+    fun `unwraps qwen nested argument values`() {
+        val parser = ToolCallParser()
+        val events = parser.feed(
+            """<tool_call>{"name":"create_file","arguments":{"path":{"argument_name":"path","argument_value":"index.html"},"content":{"argument_name":"content","argument_value":"<h1>Hello</h1>"}}}</tool_call>""",
+        )
+        val call = events.filterIsInstance<AgentEvent.Call>().single().call
+        assertEquals("index.html", call.arguments.getString("path"))
+        assertEquals("<h1>Hello</h1>", call.arguments.getString("content"))
+    }
+
+    @Test
     fun `recovers a tool call the model emitted without any tags`() {
         // Observed on device: the model drops the XML wrapper and just emits the object.
         val parser = ToolCallParser()

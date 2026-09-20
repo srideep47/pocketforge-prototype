@@ -26,6 +26,9 @@ data class GenerationStats(
         get() = if (prefillMicros <= 0L) 0.0 else promptTokens * 1_000_000.0 / prefillMicros
 }
 
+/** One message passed through MNN's native chat template. */
+data class ChatTurn(val role: String, val content: String)
+
 /**
  * On-device LLM inference over MNN.
  *
@@ -78,6 +81,29 @@ class MnnLlmEngine {
 
         // Cancelling the collector flips the native stop flag, which ends the decode loop
         // at its next token and lets the worker thread return.
+        awaitClose { bridge.nativeStopGeneration(current) }
+    }.buffer(Channel.UNLIMITED)
+
+    /**
+     * Streams a reply from a complete conversation. Agent tool rounds must use this path: the
+     * native single-prompt overload has no knowledge of earlier assistant calls or tool results.
+     */
+    fun generateChat(messages: List<ChatTurn>, maxNewTokens: Int = -1): Flow<String> = callbackFlow {
+        val current = handle
+        check(current != 0L) { "no model loaded" }
+        require(messages.isNotEmpty()) { "conversation is empty" }
+
+        val callback = MnnLlmBridge.TokenCallback { token -> trySend(token) }
+        val roles = messages.map { it.role }.toTypedArray()
+        val contents = messages.map { it.content }.toTypedArray()
+
+        launch(dispatcher) {
+            try {
+                bridge.nativeGenerateChatStream(current, roles, contents, maxNewTokens, callback)
+            } finally {
+                close()
+            }
+        }
         awaitClose { bridge.nativeStopGeneration(current) }
     }.buffer(Channel.UNLIMITED)
 

@@ -22,6 +22,18 @@ internal class MnnLlmBridge {
         callback: TokenCallback,
     ): Boolean
 
+    /**
+     * Generates from an explicit role/content conversation. Unlike the single-string overload,
+     * this lets MNN's Qwen chat template preserve the system prompt and prior tool rounds.
+     */
+    external fun nativeGenerateChatStream(
+        handle: Long,
+        roles: Array<String>,
+        contents: Array<String>,
+        maxNewTokens: Int,
+        callback: TokenCallback,
+    ): Boolean
+
     /** [promptTokens, generatedTokens, prefillMicros, decodeMicros] for the last turn. */
     external fun nativeLastStats(handle: Long): LongArray
 

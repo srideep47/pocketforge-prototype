@@ -84,6 +84,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
         }
+        // The Node process is intentionally disposable, but the project is durable. Restore the
+        // live preview after an activity/process recreation so a finished site remains usable
+        // without loading the model or asking it to start infrastructure again.
+        if (workspace.exists("index.html")) {
+            viewModelScope.launch {
+                runCatching { devServer.start(projectRoot) }
+                    .onFailure { Log.w(TAG, "could not restore preview", it) }
+            }
+        }
     }
 
     // --- model -------------------------------------------------------------------

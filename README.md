@@ -13,7 +13,7 @@ Prototype. arm64 only, `minSdk 29`, targets Android 15 (API 35).
 | **Chat + dictation** | Compose chat with Markdown rendering. The mic button transcribes into the input field with Android's `SpeechRecognizer` (offline where the device supports it) — no TTS, no playback, no always-on listening. |
 | **Web dev environment** | Node 18 (nodejs-mobile) in an isolated `:node` process serving the project over HTTP on `localhost:5173`, with live reload on file change. |
 | **Mini IDE** | A collapsible project tree with create, rename, delete, and a monospace editor. |
-| **Autonomous agent** | A Hermes-format tool-calling loop: the model creates files, edits them, starts the dev server, and the preview tab follows along. |
+| **Autonomous agent** | A constrained raw-HTML artifact loop writes the site and starts the preview deterministically, with tolerant Hermes parsing retained as a fallback. |
 
 Tools the agent can call: `create_file`, `edit_file`, `read_file`, `list_files`,
 `start_dev_server`, `stop_dev_server`.
@@ -61,7 +61,7 @@ device afterwards:
 
 | | Size | Notes |
 |---|---|---|
-| `taobao-mnn/Qwen3.5-2B-MNN` | ~1.4 GB | Fast; leaves room for the dev server alongside it. |
+| `taobao-mnn/Qwen3.5-2B-MNN` | ~1.4 GB | Recommended default: fastest iteration and ample room for the dev server. |
 | `taobao-mnn/Qwen3.5-4B-MNN` | ~2.8 GB | Better code, fewer malformed tool calls. |
 
 Downloads resume per file, so a dropped connection costs only the file in flight. Both
@@ -71,13 +71,19 @@ fetched even though only the text path is used today.
 The runtime config is written at load time — see `ModelConfig`. It is tuned for a coding
 agent rather than for chat:
 
-- `max_all_tokens = 32768`, `max_new_tokens = 4096`
-- `temperature 0.25`, `topP 0.9`, `topK 20`, `min_p 0.05`, `penalty 1.05` over a 256-token
-  window — the output is JSON tool calls and source code, where sampling variety is a defect
-- `use_mmap`, `use_cached_mmap`, `reuse_kv`, `attention_mode = 10` (INT8 KV cache)
-- `kvcache_mmap = true`, spilling the cache to the app cache directory; at 32k on a phone
-  that is not optional
+- `max_all_tokens = 10000`, `max_new_tokens = 4096`
+- Qwen's validated mixed sampler: `temperature 1.0`, `topP 0.95`, `topK 20`,
+  `minP 0`, repetition penalty `1.0`, and presence penalty `1.5`
+- `use_mmap`, `reuse_kv`, `attention_mode = 8` (FlashAttention with fp16 KV cache)
+- cached weight mmap and KV-cache mmap off for the dense 2B/4B models; this avoids the
+  reload crashes and corrupt generation seen with MNN 3.6.1's dense static cache path
 - thinking off: a `<think>` block before every tool call is a large latency tax at ~10 tok/s
+
+Agent turns use MNN's role-aware chat overload and resend the full system/user/assistant/tool
+history. The single-string overload is suitable for one-shot chat but loses the tool contract
+between rounds and must not be used by the website agent. New sites use a raw
+`<site>…</site>` envelope so Qwen 2B can emit HTML directly; requiring several kilobytes of HTML
+to survive JSON escaping was the main source of malformed calls.
 
 ## Notes
 

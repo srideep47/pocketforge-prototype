@@ -34,14 +34,14 @@ class AgentTools(
     }
 
     private fun createFile(args: JSONObject): ToolResult {
-        val path = args.requireString("path") ?: return missing("path")
+        val path = normalizeWebPath(args.requireString("path") ?: return missing("path"))
         val content = args.optString("content", "")
         workspace.write(path, content)
         return ToolResult(true, "wrote $path (${content.length} chars)")
     }
 
     private fun editFile(args: JSONObject): ToolResult {
-        val path = args.requireString("path") ?: return missing("path")
+        val path = normalizeWebPath(args.requireString("path") ?: return missing("path"))
         val target = args.requireString("target") ?: return missing("target")
         val replacement = args.optString("replacement", "")
         workspace.edit(path, target, replacement)
@@ -49,7 +49,7 @@ class AgentTools(
     }
 
     private fun readFile(args: JSONObject): ToolResult {
-        val path = args.requireString("path") ?: return missing("path")
+        val path = normalizeWebPath(args.requireString("path") ?: return missing("path"))
         return ToolResult(true, workspace.read(path))
     }
 
@@ -65,7 +65,13 @@ class AgentTools(
 
     private suspend fun startDevServer(args: JSONObject): ToolResult {
         // project_path is relative to the workspace; the default is the workspace itself.
-        val relative = args.optString("project_path", "").ifBlank { "" }
+        val requested = args.optString("project_path", "").ifBlank { "" }
+        // Models commonly pass "index.html" even though the server expects a directory.
+        val relative = if (requested.substringAfterLast('/').contains('.')) {
+            requested.substringBeforeLast('/', "")
+        } else {
+            requested
+        }
         val directory = workspace.resolve(relative)
         val state = devServer.start(directory)
         return if (state.running) {
@@ -82,13 +88,30 @@ class AgentTools(
 
     private fun missing(name: String) = ToolResult(false, "missing required argument: $name")
 
+    /** Starts the live preview as a host guarantee, not another behavior the model must learn. */
+    suspend fun ensurePreview(): ToolResult? {
+        if (!workspace.exists("index.html")) return null
+        val current = devServer.state.value
+        if (current.running && current.url != null) {
+            return ToolResult(true, "dev server running at ${current.url}")
+        }
+        val state = devServer.start(workspace.root)
+        return if (state.running) {
+            ToolResult(true, "dev server running at ${state.url}")
+        } else {
+            ToolResult(false, state.error ?: "dev server did not start")
+        }
+    }
+
+    fun hasEntryPage(): Boolean = workspace.exists("index.html")
+
     /**
      * Small models reach for the obvious synonym rather than the name in the prompt —
      * write_file for create_file was the most common. Accepting the synonym costs nothing
      * and turns a failed turn into a working one.
      */
     private fun canonicalName(name: String): String = when (name.lowercase()) {
-        "write_file", "new_file", "save_file", "create" -> "create_file"
+        "write_file", "file_create", "new_file", "save_file", "create" -> "create_file"
         "replace_in_file", "update_file", "modify_file", "edit" -> "edit_file"
         "open_file", "cat", "read" -> "read_file"
         "ls", "list", "list_directory" -> "list_files"
@@ -99,4 +122,14 @@ class AgentTools(
 
     private fun JSONObject.requireString(key: String): String? =
         optString(key).takeIf { it.isNotBlank() }
+
+    private fun normalizeWebPath(path: String): String {
+        val clean = path.trim()
+        val leaf = clean.substringAfterLast('/')
+        if (!leaf.equals("index.hmtl", ignoreCase = true) &&
+            !leaf.equals("index.htm", ignoreCase = true)
+        ) return clean
+        val parent = clean.substringBeforeLast('/', "")
+        return if (parent.isBlank()) "index.html" else "$parent/index.html"
+    }
 }

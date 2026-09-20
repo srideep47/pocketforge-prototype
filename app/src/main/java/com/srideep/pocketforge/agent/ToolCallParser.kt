@@ -1,5 +1,6 @@
 package com.srideep.pocketforge.agent
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** One tool invocation the model asked for. */
@@ -145,12 +146,9 @@ class ToolCallParser(private val knownTools: Set<String> = DEFAULT_TOOLS) {
                 null
             } ?: continue
 
-            val name = parsed.optString("name")
-            if (name.isBlank()) return AgentEvent.Malformed(body, "tool call has no name")
-            val args = parsed.optJSONObject("arguments")
-                ?: parsed.optJSONObject("parameters")
-                ?: JSONObject()
-            return AgentEvent.Call(ToolCall(name, args, body))
+            val normalized = normalizeCall(parsed)
+                ?: return AgentEvent.Malformed(body, "tool call has no name")
+            return AgentEvent.Call(ToolCall(normalized.first, normalized.second, body))
         }
         // Every strict parse failed. Before giving up on a turn that took a minute to
         // generate, try to lift the call out by hand: the content is usually correct and
@@ -176,6 +174,75 @@ class ToolCallParser(private val knownTools: Set<String> = DEFAULT_TOOLS) {
             stringValueOf(text, key)?.let { arguments.put(key, it) }
         }
         return AgentEvent.Call(ToolCall(name, arguments, text))
+    }
+
+    /**
+     * Accepts the tool dialects emitted by the bundled Qwen exports. The ordinary Hermes
+     * shape is a flat arguments object. Qwen 3.5 also occasionally emits a `call_tool`
+     * wrapper or a list of `{argument_name, argument_value}` records even when shown the
+     * canonical schema. Normalize all of them before the executor sees the call.
+     */
+    private fun normalizeCall(parsed: JSONObject): Pair<String, JSONObject>? {
+        var name = parsed.optString("name")
+            .ifBlank { parsed.optString("tool_name") }
+            .ifBlank { parsed.optString("function") }
+        var rawArguments: Any? = parsed.opt("arguments") ?: parsed.opt("parameters")
+
+        if (name == "call_tool" || name == "tool_call") {
+            val wrapper = rawArguments as? JSONObject ?: parsed
+            name = wrapper.optString("tool_name")
+                .ifBlank { wrapper.optString("name") }
+                .ifBlank { wrapper.optString("function") }
+            rawArguments = wrapper.opt("arguments")
+                ?: wrapper.opt("parameters")
+                ?: wrapper.opt("tool_arguments")
+        }
+        if (name.isBlank()) return null
+        return name to normalizeArguments(rawArguments)
+    }
+
+    private fun normalizeArguments(raw: Any?): JSONObject = when (raw) {
+        is JSONObject -> {
+            val argumentName = raw.optString("argument_name")
+                .ifBlank { raw.optString("name").takeIf { raw.has("argument_value") } ?: "" }
+            JSONObject().also { normalized ->
+                raw.keys().forEach { key ->
+                    if (key !in ARGUMENT_META_KEYS) {
+                        normalized.put(key, unwrapArgumentValue(raw.opt(key)))
+                    }
+                }
+                if (argumentName.isNotBlank()) normalized.put(
+                    argumentName,
+                    unwrapArgumentValue(raw.opt("argument_value") ?: raw.opt("value") ?: ""),
+                )
+            }
+        }
+        is JSONArray -> JSONObject().also { normalized ->
+            for (index in 0 until raw.length()) {
+                val item = raw.optJSONObject(index) ?: continue
+                val key = item.optString("argument_name")
+                    .ifBlank { item.optString("name") }
+                    .ifBlank { item.optString("key") }
+                if (key.isNotBlank()) {
+                    normalized.put(
+                        key,
+                        unwrapArgumentValue(
+                            item.opt("argument_value") ?: item.opt("value") ?: item.opt("content") ?: "",
+                        ),
+                    )
+                }
+            }
+        }
+        is String -> runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
+        else -> JSONObject()
+    }
+
+    private fun unwrapArgumentValue(value: Any?): Any? = when (value) {
+        is JSONObject -> value.opt("argument_value")
+            ?: value.opt("value")
+            ?: value.opt("content")
+            ?: value
+        else -> value
     }
 
     /**
@@ -262,11 +329,14 @@ class ToolCallParser(private val knownTools: Set<String> = DEFAULT_TOOLS) {
             "directory",
             "project_path",
         )
+        val ARGUMENT_META_KEYS = setOf(
+            "argument_name", "argument_value", "name", "key", "value", "type",
+        )
 
         // The synonyms are here too: AgentTools maps them onto the real tools, so the
         // parser has to recognise them or salvage would reject a call it could run.
         val DEFAULT_TOOLS = setOf(
-            "create_file", "write_file", "new_file", "save_file",
+            "create_file", "write_file", "file_create", "new_file", "save_file",
             "edit_file", "replace_in_file", "update_file", "modify_file",
             "read_file", "open_file",
             "list_files", "list_directory",

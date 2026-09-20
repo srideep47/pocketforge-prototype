@@ -1,6 +1,7 @@
 package com.srideep.pocketforge.agent
 
 import android.util.Log
+import com.srideep.pocketforge.engine.mnn.ChatTurn
 import com.srideep.pocketforge.engine.mnn.GenerationStats
 import com.srideep.pocketforge.engine.mnn.MnnLlmEngine
 import kotlinx.coroutines.currentCoroutineContext
@@ -57,8 +58,13 @@ class AgentLoop(
 
     fun run(userMessage: String): Flow<AgentUpdate> = flow {
         val parser = ToolCallParser()
-        var prompt = HermesPrompt.firstTurn(userMessage)
+        val conversation = mutableListOf(
+            ChatTurn("system", HermesPrompt.systemPrompt()),
+            ChatTurn("user", userMessage),
+        )
         var malformedRetries = 0
+        var incompleteRetries = 0
+        var siteChanged = false
 
         for (iteration in 0 until maxIterations) {
             currentCoroutineContext().ensureActive()
@@ -66,9 +72,11 @@ class AgentLoop(
             val pending = mutableListOf<ToolCall>()
             var sawMalformed = false
             parser.reset()
+            val rawAssistant = StringBuilder()
 
             var streamed = 0
-            engine.generate(prompt, maxNewTokensPerTurn).collect { chunk ->
+            engine.generateChat(conversation, maxNewTokensPerTurn).collect { chunk ->
+                rawAssistant.append(chunk)
                 streamed += chunk.length
                 emit(AgentUpdate.Progress(streamed))
                 for (event in parser.feed(chunk)) {
@@ -81,6 +89,19 @@ class AgentLoop(
                 emitEvent(event, pending)
             }
             emit(AgentUpdate.TurnStats(engine.lastStats()))
+            if (pending.isEmpty()) {
+                SiteArtifact.extract(rawAssistant.toString())?.let { html ->
+                    pending += ToolCall(
+                        name = "create_file",
+                        arguments = org.json.JSONObject()
+                            .put("path", "index.html")
+                            .put("content", html),
+                        raw = "<site> artifact",
+                    )
+                    sawMalformed = false
+                }
+            }
+            conversation += ChatTurn("assistant", rawAssistant.toString())
 
             if (pending.isEmpty()) {
                 // A turn that produced a broken call is worth one nudge: the model
@@ -88,8 +109,27 @@ class AgentLoop(
                 // far cheaper than making the user retype the task.
                 if (sawMalformed && malformedRetries < 1) {
                     malformedRetries++
-                    prompt = HermesPrompt.retryAfterMalformed()
+                    conversation += ChatTurn("user", HermesPrompt.retryAfterMalformed())
                     continue
+                }
+                if ((!tools.hasEntryPage() || !siteChanged) && incompleteRetries < 2) {
+                    incompleteRetries++
+                    conversation += ChatTurn(
+                        "user",
+                        HermesPrompt.retryIncomplete(hasIndex = tools.hasEntryPage()),
+                    )
+                    continue
+                }
+                if (!tools.hasEntryPage() || !siteChanged) {
+                    emit(AgentUpdate.Failed("The model stopped before it wrote a valid index.html"))
+                    return@flow
+                }
+                val finalText = rawAssistant.toString()
+                    .replace(Regex("(?s)<think>.*?</think>"), "")
+                    .trim()
+                if (finalText.isNotBlank()) emit(AgentUpdate.Token(finalText))
+                tools.ensurePreview()?.let { result ->
+                    PREVIEW_URL.find(result.content)?.value?.let { emit(AgentUpdate.PreviewReady(it)) }
                 }
                 emit(AgentUpdate.Done)
                 return@flow
@@ -98,16 +138,25 @@ class AgentLoop(
             val results = mutableListOf<Pair<ToolCall, ToolResult>>()
             for (call in pending) {
                 currentCoroutineContext().ensureActive()
+                Log.i(TAG, "tool call name=${call.name} keys=${call.arguments.keys().asSequence().toList()}")
                 emit(AgentUpdate.ToolStarted(call.name, describe(call)))
                 val result = tools.execute(call)
                 results += call to result
+                if (result.ok &&
+                    (result.content.startsWith("wrote ") || result.content.startsWith("edited "))
+                ) {
+                    siteChanged = true
+                }
                 emit(AgentUpdate.ToolFinished(call.name, result.ok, result.content.take(400)))
-                if (result.ok && call.name == "start_dev_server") {
+                if (result.ok) {
                     PREVIEW_URL.find(result.content)?.value?.let { emit(AgentUpdate.PreviewReady(it)) }
                 }
             }
 
-            prompt = HermesPrompt.toolResponses(results)
+            conversation += ChatTurn("user", HermesPrompt.toolResponses(results))
+            tools.ensurePreview()?.let { result ->
+                PREVIEW_URL.find(result.content)?.value?.let { emit(AgentUpdate.PreviewReady(it)) }
+            }
         }
 
         emit(AgentUpdate.Failed("stopped after $maxIterations tool rounds"))
@@ -118,13 +167,12 @@ class AgentLoop(
         pending: MutableList<ToolCall>,
     ) {
         when (event) {
-            is AgentEvent.Text -> emit(AgentUpdate.Token(event.delta))
+            // Hold prose until the turn ends. A <site> artifact arrives through this branch too;
+            // streaming it would dump source code into chat before we can classify the turn.
+            is AgentEvent.Text -> Unit
             is AgentEvent.Call -> pending += event.call
-            // Show the model's mistake instead of silently dropping the block; it is the
-            // single most useful thing to see when a small model drifts off-format.
             is AgentEvent.Malformed -> {
                 Log.w(TAG, "malformed tool call (${event.reason}): ${event.raw}")
-                emit(AgentUpdate.Failed("bad tool call (${event.reason})"))
             }
         }
     }

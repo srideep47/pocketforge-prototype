@@ -100,6 +100,52 @@ std::string toStdString(JNIEnv* env, jstring value) {
     return out;
 }
 
+std::vector<std::string> toStringVector(JNIEnv* env, jobjectArray values) {
+    std::vector<std::string> out;
+    if (values == nullptr) {
+        return out;
+    }
+    const jsize count = env->GetArrayLength(values);
+    out.reserve(static_cast<size_t>(count));
+    for (jsize i = 0; i < count; ++i) {
+        auto value = static_cast<jstring>(env->GetObjectArrayElement(values, i));
+        out.push_back(toStdString(env, value));
+        if (value != nullptr) {
+            env->DeleteLocalRef(value);
+        }
+    }
+    return out;
+}
+
+bool streamResponse(
+    JNIEnv* env,
+    Session* session,
+    jobject callback,
+    const std::function<void(std::ostream*)>& respond) {
+    if (session == nullptr || session->llm == nullptr || callback == nullptr) {
+        return false;
+    }
+
+    jclass callbackClass = env->GetObjectClass(callback);
+    jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
+    env->DeleteLocalRef(callbackClass);
+    if (onToken == nullptr) {
+        LOGE("callback is missing onToken(String)");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(session->generateLock);
+    session->cancelled.store(false);
+    auto* context = const_cast<LlmContext*>(session->llm->getContext());
+    context->status = LlmStatus::RUNNING;
+
+    CallbackStreamBuf buffer(env, callback, onToken);
+    std::ostream out(&buffer);
+    respond(&out);
+    out.flush();
+    return !session->cancelled.load();
+}
+
 }  // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -128,34 +174,32 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeGenerateStream(
     JNIEnv* env, jobject, jlong handle, jstring jPrompt, jint maxNewTokens, jobject callback) {
     Session* session = asSession(handle);
-    if (session == nullptr || session->llm == nullptr || callback == nullptr) {
+    const std::string prompt = toStdString(env, jPrompt);
+    return streamResponse(env, session, callback, [&](std::ostream* out) {
+        session->llm->response(prompt, out, nullptr, maxNewTokens);
+    }) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeGenerateChatStream(
+    JNIEnv* env, jobject, jlong handle, jobjectArray jRoles, jobjectArray jContents,
+    jint maxNewTokens, jobject callback) {
+    Session* session = asSession(handle);
+    const auto roles = toStringVector(env, jRoles);
+    const auto contents = toStringVector(env, jContents);
+    if (roles.size() != contents.size() || roles.empty()) {
+        LOGE("invalid chat history: roles=%zu contents=%zu", roles.size(), contents.size());
         return JNI_FALSE;
     }
 
-    jclass callbackClass = env->GetObjectClass(callback);
-    jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
-    env->DeleteLocalRef(callbackClass);
-    if (onToken == nullptr) {
-        LOGE("callback is missing onToken(String)");
-        return JNI_FALSE;
+    MNN::Transformer::ChatMessages messages;
+    messages.reserve(roles.size());
+    for (size_t i = 0; i < roles.size(); ++i) {
+        messages.emplace_back(roles[i], contents[i]);
     }
-
-    // One generation at a time per model: MNN keeps mutable decode state on the instance.
-    std::lock_guard<std::mutex> lock(session->generateLock);
-    session->cancelled.store(false);
-
-    // Clear any terminal status left over from the previous turn so is_stop() does not
-    // short-circuit this one.
-    auto* context = const_cast<LlmContext*>(session->llm->getContext());
-    context->status = LlmStatus::RUNNING;
-
-    CallbackStreamBuf buffer(env, callback, onToken);
-    std::ostream out(&buffer);
-
-    session->llm->response(toStdString(env, jPrompt), &out, nullptr, maxNewTokens);
-    out.flush();
-
-    return session->cancelled.load() ? JNI_FALSE : JNI_TRUE;
+    return streamResponse(env, session, callback, [&](std::ostream* out) {
+        session->llm->response(messages, out, nullptr, maxNewTokens);
+    }) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
