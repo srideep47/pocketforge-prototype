@@ -79,4 +79,24 @@ class ToolCallParserTest {
         )
         assertEquals("list_files", events.filterIsInstance<AgentEvent.Call>().single().call.name)
     }
+
+    @Test
+    fun `recovers a tool call the model emitted without any tags`() {
+        // Observed on device: the model drops the XML wrapper and just emits the object.
+        val parser = ToolCallParser()
+        val events = parser.feed(
+            "{\"name\": \"start_dev_server\", \"arguments\": {}}",
+        ) + parser.finish()
+
+        assertEquals("start_dev_server", events.filterIsInstance<AgentEvent.Call>().single().call.name)
+    }
+
+    @Test
+    fun `prose that merely mentions json is not a tool call`() {
+        val parser = ToolCallParser()
+        val events = parser.feed("I will send {\"name\": \"something_else\"} shortly.") + parser.finish()
+
+        assertTrue(events.filterIsInstance<AgentEvent.Call>().isEmpty())
+        assertTrue(events.filterIsInstance<AgentEvent.Text>().isNotEmpty())
+    }
 }

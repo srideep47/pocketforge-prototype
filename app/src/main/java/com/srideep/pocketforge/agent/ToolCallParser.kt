@@ -23,10 +23,14 @@ sealed interface AgentEvent {
  * released once it cannot still turn out to be the start of `<tool_call>`, which keeps a
  * half-typed tag from flashing up in the transcript.
  */
-class ToolCallParser {
+class ToolCallParser(private val knownTools: Set<String> = DEFAULT_TOOLS) {
 
     private val buffer = StringBuilder()
     private var insideCall = false
+
+    /** Everything released as prose this turn, and whether any call was parsed. */
+    private val releasedText = StringBuilder()
+    private var sawCall = false
 
     fun feed(chunk: String): List<AgentEvent> {
         buffer.append(chunk)
@@ -51,12 +55,17 @@ class ToolCallParser {
                     if (safe > 0) {
                         val text = buffer.substring(0, safe)
                         buffer.delete(0, safe)
-                        if (text.isNotEmpty()) events += AgentEvent.Text(text)
+                        if (text.isNotEmpty()) {
+                            releasedText.append(text)
+                            events += AgentEvent.Text(text)
+                        }
                     }
                     break
                 }
                 if (start > 0) {
-                    events += AgentEvent.Text(buffer.substring(0, start))
+                    val text = buffer.substring(0, start)
+                    releasedText.append(text)
+                    events += AgentEvent.Text(text)
                 }
                 buffer.delete(0, start + OPEN_TAG.length)
                 insideCall = true
@@ -71,22 +80,45 @@ class ToolCallParser {
         if (buffer.isNotEmpty()) {
             val leftover = buffer.toString()
             buffer.setLength(0)
-            events += if (insideCall) {
+            if (insideCall) {
                 // The model stopped before its closing tag, which small models do often.
                 // The body is usually complete bar a brace, so try to parse it anyway
                 // rather than throwing away a turn that took a minute to generate.
-                parseCall(leftover)
+                val event = parseCall(leftover)
+                if (event is AgentEvent.Call) sawCall = true
+                events += event
             } else {
-                AgentEvent.Text(leftover)
+                releasedText.append(leftover)
+                events += AgentEvent.Text(leftover)
             }
         }
         insideCall = false
+
+        // Small models also drop the tags entirely and emit the bare object. Prose is
+        // streamed out as it arrives, so this can only be judged once the turn is over
+        // and only matters when nothing else this turn parsed as a call.
+        if (!sawCall) {
+            bareCall(releasedText.toString())?.let { events += it }
+        }
         return events
+    }
+
+    /**
+     * Looks for an untagged `{"name": ..., "arguments": ...}` naming a tool we know.
+     * Requiring a known name is what keeps this from firing on prose about JSON.
+     */
+    private fun bareCall(text: String): AgentEvent? {
+        val start = text.indexOf('{')
+        if (start < 0 || !text.contains("\"name\"")) return null
+        val parsed = parseCall(text.substring(start))
+        return (parsed as? AgentEvent.Call)?.takeIf { it.call.name in knownTools }
     }
 
     fun reset() {
         buffer.setLength(0)
+        releasedText.setLength(0)
         insideCall = false
+        sawCall = false
     }
 
     private fun parseCall(body: String): AgentEvent {
@@ -158,5 +190,14 @@ class ToolCallParser {
     private companion object {
         const val OPEN_TAG = "<tool_call>"
         const val CLOSE_TAG = "</tool_call>"
+
+        val DEFAULT_TOOLS = setOf(
+            "create_file",
+            "edit_file",
+            "read_file",
+            "list_files",
+            "start_dev_server",
+            "stop_dev_server",
+        )
     }
 }

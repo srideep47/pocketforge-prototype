@@ -72,6 +72,7 @@ class StudioActions(
     val onRenameFile: (String, String) -> Unit,
     val onDeleteFile: (String) -> Unit,
     val onRefreshFiles: () -> Unit,
+    val onNewProject: () -> Unit,
     val onStartServer: () -> Unit,
     val onStopServer: () -> Unit,
     val onLoadModel: (String) -> Unit,
@@ -109,6 +110,7 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                     onRename = actions.onRenameFile,
                     onDelete = actions.onDeleteFile,
                     onRefresh = actions.onRefreshFiles,
+                    onNewProject = actions.onNewProject,
                 )
             }
         },
@@ -226,7 +228,7 @@ private fun ModelChip(name: String?, status: ModelStatus, onClick: () -> Unit) {
     }
     val label = when {
         status == ModelStatus.LOADING -> "Loading"
-        status == ModelStatus.READY && name != null -> name.substringAfterLast("· ")
+        status == ModelStatus.READY && name != null -> name
         status == ModelStatus.FAILED -> "Failed"
         else -> "No model"
     }

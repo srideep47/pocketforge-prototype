@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
                         onRenameFile = viewModel::renameFile,
                         onDeleteFile = viewModel::deleteFile,
                         onRefreshFiles = viewModel::refreshFiles,
+                        onNewProject = viewModel::newProject,
                         onStartServer = viewModel::startDevServer,
                         onStopServer = viewModel::stopDevServer,
                         onLoadModel = viewModel::loadModel,

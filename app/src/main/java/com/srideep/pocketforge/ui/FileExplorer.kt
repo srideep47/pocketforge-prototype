@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.ExpandLess
@@ -67,6 +68,7 @@ fun FileExplorer(
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
     onRefresh: () -> Unit,
+    onNewProject: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var collapsed by rememberSaveable { mutableStateOf(setOf<String>()) }
@@ -88,6 +90,13 @@ fun FileExplorer(
                     text = if (fileCount == 1) "1 file" else "$fileCount files",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = { dialog = ExplorerDialog.ConfirmNewProject }) {
+                Icon(
+                    Icons.Default.RestartAlt,
+                    contentDescription = "New project",
+                    modifier = Modifier.size(20.dp),
                 )
             }
             IconButton(onClick = onRefresh) {
@@ -168,6 +177,24 @@ fun FileExplorer(
                 dialog = null
                 if (path != open.path) onRename(open.path, path)
             },
+        )
+
+        ExplorerDialog.ConfirmNewProject -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("Start a new project?") },
+            text = {
+                Text(
+                    "Deletes every file in the project and clears the conversation, so the " +
+                        "agent starts from nothing instead of editing what is already here.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    dialog = null
+                    onNewProject()
+                }) { Text("Start fresh") }
+            },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } },
         )
 
         is ExplorerDialog.ConfirmDelete -> AlertDialog(
@@ -364,6 +391,7 @@ private fun NameDialog(
 }
 
 private sealed interface ExplorerDialog {
+    data object ConfirmNewProject : ExplorerDialog
     data object NewFile : ExplorerDialog
     data object NewFolder : ExplorerDialog
     data class Rename(val path: String) : ExplorerDialog

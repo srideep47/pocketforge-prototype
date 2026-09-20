@@ -163,7 +163,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _state.value = _state.value.copy(
                 modelStatus = ModelStatus.LOADING,
-                modelName = model.displayName,
+                modelName = model.shortName,
                 status = "Loading " + model.displayName,
             )
             val loaded = runCatching {
@@ -171,6 +171,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     ModelConfig(
                         modelDir = model.directoryIn(modelsDir),
                         tmpDir = File(getApplication<Application>().cacheDir, "mnn"),
+                        // Exports disagree on this: Qwen ships tokenizer.txt, Gemma 4
+                        // ships tokenizer.mtok.
+                        tokenizerFile = model.tokenizerFile,
                     ),
                 )
             }.getOrElse { error ->
@@ -377,6 +380,34 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             _state.value = _state.value.copy(openFile = null)
         }
         refreshFiles()
+    }
+
+    /**
+     * Clears the project and the conversation so the next prompt starts from nothing.
+     *
+     * Wiping files alone is not enough: MNN keeps the conversation's KV cache on the
+     * model, so without resetting it the agent still remembers the page it wrote and
+     * keeps editing that instead of starting over. The dev server goes too, since it is
+     * serving a directory that is about to be empty.
+     */
+    fun newProject() {
+        stopGeneration()
+        devServer.stop()
+        viewModelScope.launch {
+            workspace.list().forEach { entry ->
+                runCatching { workspace.delete(entry.relativePath) }
+            }
+            engine.resetHistory()
+            _state.value = _state.value.copy(
+                messages = emptyList(),
+                input = "",
+                openFile = null,
+                previewUrl = null,
+                devServerRunning = false,
+                status = "New project",
+            )
+            refreshFiles()
+        }
     }
 
     // --- dev server ---------------------------------------------------------------
