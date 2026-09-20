@@ -63,10 +63,16 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         modelsDir.mkdirs()
-        if (workspace.list().isEmpty()) {
+        // Seeded once, on first run only. Keying off "is the project empty" instead meant
+        // New project wiped the files and the next launch put them straight back, which
+        // both undoes the action and leaves the agent editing a page it did not write.
+        val seededMarker = File(application.filesDir, "projects/.seeded")
+        if (!seededMarker.exists()) {
             ProjectTemplates.starter("My Site").forEach { (path, content) ->
                 workspace.write(path, content)
             }
+            seededMarker.parentFile?.mkdirs()
+            seededMarker.writeText("1")
         }
         refreshFiles()
         refreshModels()

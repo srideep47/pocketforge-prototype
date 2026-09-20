@@ -20,7 +20,7 @@ class AgentTools(
 ) {
 
     suspend fun execute(call: ToolCall): ToolResult = try {
-        when (call.name) {
+        when (canonicalName(call.name)) {
             "create_file" -> createFile(call.arguments)
             "edit_file" -> editFile(call.arguments)
             "read_file" -> readFile(call.arguments)
@@ -81,6 +81,21 @@ class AgentTools(
     }
 
     private fun missing(name: String) = ToolResult(false, "missing required argument: $name")
+
+    /**
+     * Small models reach for the obvious synonym rather than the name in the prompt —
+     * write_file for create_file was the most common. Accepting the synonym costs nothing
+     * and turns a failed turn into a working one.
+     */
+    private fun canonicalName(name: String): String = when (name.lowercase()) {
+        "write_file", "new_file", "save_file", "create" -> "create_file"
+        "replace_in_file", "update_file", "modify_file", "edit" -> "edit_file"
+        "open_file", "cat", "read" -> "read_file"
+        "ls", "list", "list_directory" -> "list_files"
+        "run_dev_server", "serve", "start_server" -> "start_dev_server"
+        "stop_server" -> "stop_dev_server"
+        else -> name.lowercase()
+    }
 
     private fun JSONObject.requireString(key: String): String? =
         optString(key).takeIf { it.isNotBlank() }

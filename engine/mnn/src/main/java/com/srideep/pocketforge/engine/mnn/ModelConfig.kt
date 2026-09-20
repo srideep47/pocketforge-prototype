@@ -5,21 +5,21 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * The `config.json` MNN reads when a model is created.
+ * The runtime config MNN reads when a model is created.
  *
- * Defaults are tuned for one job: a coding agent on a phone. Sampling is cold and
- * penalised so the model emits the same well-formed tool call twice rather than
- * improvising; weights are mmap'd and the KV cache is INT8 and disk-backed, because a
- * 32k window on a handset does not fit in RAM any other way.
+ * These values are not guesses. They match a configuration A/B-tested on device against
+ * Qwen3.5-2B on MNN 3.6.1, and several are counter-intuitive enough that changing one
+ * "because it sounds faster" reliably breaks generation — the comments below record what
+ * actually happened when each was set the other way.
+ *
+ * The settings merge onto the `config.json` the model ships with rather than replacing it:
+ * that file carries per-export choices (vision metadata, per-modality backends) which are
+ * silently lost if it is overwritten.
  */
 data class ModelConfig(
-    /** Directory holding the exported MNN model (llm.mnn, tokenizer.txt, ...). */
+    /** Directory holding the exported MNN model (llm.mnn, tokenizer, config.json, ...). */
     val modelDir: File,
-    /**
-     * Scratch directory for mmap'd weights and KV cache. Kept off the model directory on
-     * purpose: models sit on the FUSE-backed external volume, which is a poor host for a
-     * file the runtime maps and writes to.
-     */
+    /** Scratch directory for mmap'd weights. Kept off the FUSE volume the model sits on. */
     val tmpDir: File = File(modelDir, "tmp"),
 
     val llmModel: String = "llm.mnn",
@@ -27,120 +27,132 @@ data class ModelConfig(
     val tokenizerFile: String = "tokenizer.txt",
 
     val backendType: String = "cpu",
-    /**
-     * Three, matching the A710 cluster on the device this was measured on.
-     *
-     * MNN splits a layer evenly across threads and waits for the slowest, so pulling in
-     * little cores costs more than it adds. Worth knowing: with power=high MNN still
-     * never scheduled anything onto the prime core here — during generation cpu7 sat at
-     * its 787 MHz floor while cpu4-6 ran flat out at 2745 MHz — so the useful width is
-     * the mid cluster, and asking for more threads than that only adds contention.
-     */
-    val threadNum: Int = 3,
-    /** fp16 compute. */
+    val threadNum: Int = 6,
     val precision: String = "low",
     /**
-     * "low", and this one is worth stating plainly because the obvious guess is wrong:
-     * setting it to "high" to "keep more resident" cost 3.6x. Measured on Qwen3.5-2B,
-     * Snapdragon 8+ Gen 1 — 2.6 tok/s decode at "high" against 9.3 at "low".
+     * "low". The obvious guess is wrong: setting this to "high" to keep more resident cost
+     * 3.6x — 2.6 tok/s decode against 9.3 — on Qwen3.5-2B, Snapdragon 8+ Gen 1.
      */
     val memory: String = "low",
     val power: String = "high",
 
-    /** Total context window, prompt plus generation. */
-    val maxAllTokens: Int = 32_768,
-    /** Ceiling on a single reply, so one runaway turn cannot eat the whole window. */
-    /**
-     * Deliberately tight. A small model that loses the format loops instead of stopping,
-     * and the only thing a high ceiling buys is a longer wait before we find out.
-     */
-    val maxNewTokens: Int = 2_048,
+    val maxAllTokens: Int = 10_000,
+    val maxNewTokens: Int = 4_096,
 
-    /**
-     * On. The reasoning against it — that paging weights from UFS makes decode
-     * storage-bound — did not survive measurement: mmap'd was slightly faster per token
-     * (10.3 against 9.9 tok/s) and cut model load from roughly 40s to 7s, because the
-     * page cache holds a 1.2 GB model comfortably on a 12 GB device.
-     */
     val useMmap: Boolean = true,
-    val useCachedMmap: Boolean = true,
-    val reuseKv: Boolean = true,
-    /** 10 = INT8 quantised K and V cache. MNN downgrades it to 9 when reuse_kv is on. */
-    val attentionMode: Int = 10,
     /**
-     * Off: a disk-backed KV cache puts a UFS read in the path of every attention step.
-     * MNN grows the cache with the sequence rather than preallocating [maxAllTokens], so
-     * an ordinary agent run stays well inside RAM even with a 32k ceiling.
+     * Off. MNN 3.6.1 can segfault inside createExecutionWithExternal when a dense model is
+     * loaded from its generated static cache after an earlier session was released.
+     * Rebuilding a 1-2 GB dense model costs seconds; the crash costs the session.
      */
+    val useCachedMmap: Boolean = false,
     val kvcacheMmap: Boolean = false,
+    val reuseKv: Boolean = true,
 
     /**
-     * Lookahead speculative decoding drafts tokens from n-grams already seen and verifies
-     * them in one pass, which is a real win on repetitive code.
+     * 8 = FlashAttention with an fp16 KV cache, and the only mode that survives testing.
      *
-     * Off after measuring it on a Snapdragon 8+ Gen 1 with Qwen3.5-2B: it did not improve
-     * time-to-finish, and turns ran noticeably longer, which is what drafting from
-     * already-seen n-grams does to a model inclined to restate itself. Prefill, not
-     * decode, was the real cost here — see HermesPrompt.
+     * The quantised alternatives both fail: 10 (int8 K+V, which MNN silently downgrades to
+     * 9 / K-only whenever reuse_kv is on) and 14 (4-bit). Observed on device with 10 set,
+     * across two SoCs — Qwen3.5-2B emitted 2,048 tokens of the letter F, and Gemma 4 E2B
+     * emitted 2,048 copies of its <unused31> placeholder. Mode 8 was also not slower.
      */
-    val speculativeType: String = "",
-    val draftPredictLength: Int = 6,
-    val ngramMatchMaxLen: Int = 4,
-    /** Feed generated tokens back into the n-gram table, not just the prompt. */
-    val ngramUpdate: Boolean = true,
+    val attentionMode: Int = 8,
+    val dynamicOption: Int = 0,
 
-    // Sampling. These are the values the agent loop was first proven against on device.
-    // Lowering the temperature and adding a penalty stage to chase "more deterministic
-    // code" made a 2B fall into degenerate repetition — near-greedy decoding is the
-    // classic trigger — so any change here needs a run on hardware behind it.
-    val temperature: Float = 0.6f,
+    // Sampling follows what the model publishers validated against rather than generic
+    // engine advice. Qwen3.5's model card: temperature 1.0, topP 0.95, topK 20, min_p 0,
+    // repetition_penalty 1.0 (off), presence_penalty 1.5.
+    //
+    // Cold sampling is actively harmful here. Dropping temperature to 0.25 to make code
+    // generation "more deterministic" put a 2B into a degenerate repetition loop that ran
+    // until it hit the token ceiling; near-greedy decoding is the classic trigger.
+    val temperature: Float = 1.0f,
     val topP: Float = 0.95f,
-    val topK: Int = 40,
+    val topK: Int = 20,
+    val minP: Float = 0.0f,
+    val tfsZ: Float = 1.0f,
+    val typical: Float = 0.95f,
+    /** Multiplicative repetition penalty; the publishers ship this off and lean on presence. */
+    val penalty: Float = 1.0f,
+    /** Additive per-token-seen penalty — Qwen3.5's own recommended anti-loop control. */
+    val presencePenalty: Float = 1.5f,
+    val nGram: Int = 8,
+    val nGramFactor: Float = 1.02f,
 
+    /**
+     * Qwen3.5 emits a `<think>` block before answering when this is on, and MNN offers no
+     * way to cap one — no stop string, no thinking-token limit. On a 2B driving a tool
+     * loop the latency is not worth it.
+     */
+    val enableThinking: Boolean = false,
 ) {
 
-    fun toJson(): JSONObject = JSONObject().apply {
-        // MNN resolves these by concatenating its base_dir (the config file's own
-        // directory) with the value, so they must stay bare file names.
-        put("llm_model", llmModel)
-        put("llm_weight", llmWeight)
-        put("tokenizer_file", tokenizerFile)
-
-        put("backend_type", backendType)
-        put("thread_num", threadNum)
-        put("precision", precision)
-        put("memory", memory)
-        put("power", power)
-
-        put("max_all_tokens", maxAllTokens)
-        put("max_new_tokens", maxNewTokens)
-
-        put("use_mmap", useMmap)
-        put("use_cached_mmap", useCachedMmap)
-        put("reuse_kv", reuseKv)
-        put("attention_mode", attentionMode)
-        put("kvcache_mmap", kvcacheMmap)
-
-        if (speculativeType.isNotBlank()) {
-            put("speculative_type", speculativeType)
-            put("draft_predict_length", draftPredictLength)
-            put("ngram_match_maxlen", ngramMatchMaxLen)
-            put("ngram_update", ngramUpdate)
-            put("draft_match_strictness", "low")
-            put("draft_selection_rule", "freqxlen")
+    /** Our settings layered onto the export's own config.json. */
+    fun toJson(): JSONObject {
+        val shipped = File(modelDir, "config.json")
+        val merged = if (shipped.isFile) {
+            runCatching { JSONObject(shipped.readText()) }.getOrElse { JSONObject() }
+        } else {
+            JSONObject()
         }
-        // tmp_path is the one path MNN takes verbatim rather than joining to base_dir.
-        put("tmp_path", tmpDir.absolutePath)
 
-        // No sampler_type override: MNN's default chain is what this loop was proven
-        // against, and forcing "mixed" with a penalty stage is what broke it.
-        put("temperature", temperature.toDouble())
-        put("topP", topP.toDouble())
-        put("topK", topK)
+        return merged.apply {
+            // MNN builds each path as base_dir + value, base_dir being this config file's
+            // own directory, so these stay bare file names.
+            put("llm_model", llmModel)
+            put("llm_weight", llmWeight)
+            put("tokenizer_file", tokenizerFile)
+
+            put("backend_type", backendType)
+            put("thread_num", threadNum)
+            put("precision", precision)
+            put("memory", memory)
+            put("power", power)
+
+            put("max_all_tokens", maxAllTokens)
+            put("max_new_tokens", maxNewTokens)
+
+            put("use_mmap", useMmap)
+            put("use_cached_mmap", useCachedMmap)
+            put("kvcache_mmap", kvcacheMmap)
+            put("reuse_kv", reuseKv)
+            // attention_mode supersedes the legacy quant_qkv field from MNN 3.5 on; writing
+            // both would just be a second, contradictory source of truth.
+            put("attention_mode", attentionMode)
+            put("dynamic_option", dynamicOption)
+            // tmp_path is the one path MNN takes verbatim rather than joining to base_dir.
+            put("tmp_path", tmpDir.absolutePath)
+
+            put("temperature", temperature.toDouble())
+            put("topP", topP.toDouble())
+            put("topK", topK)
+            put("minP", minP.toDouble())
+            put("tfsZ", tfsZ.toDouble())
+            put("typical", typical.toDouble())
+            put("penalty", penalty.toDouble())
+            put("presence_penalty", presencePenalty.toDouble())
+            put("n_gram", nGram)
+            put("ngram_factor", nGramFactor.toDouble())
+            put("sampler_type", "mixed")
+            // MNN only runs the samplers named here, and the list shipped inside model
+            // packages omits tfs and typical — so configuring those without this override
+            // sets values that never execute. This is MNN's own documented default order.
+            put(
+                "mixed_samplers",
+                JSONArray(listOf("penalty", "topK", "tfs", "typical", "topP", "min_p", "temperature")),
+            )
+
+            // Deep-merged so flipping the thinking flag does not wipe other context keys
+            // the package defined. Qwen3.5's chat template gates <think> on exactly this.
+            val jinja = optJSONObject("jinja") ?: JSONObject().also { put("jinja", it) }
+            val context = jinja.optJSONObject("context") ?: JSONObject().also { jinja.put("context", it) }
+            context.put("enable_thinking", enableThinking)
+        }
     }
 
     /**
-     * Materialises the config next to the model and returns the file MNN should load.
+     * Materialises the merged config next to the model and returns the file MNN loads.
      * The scratch directory is created here too, since MNN expects it to exist.
      */
     fun writeTo(target: File = File(modelDir, "pocketforge_config.json")): File {

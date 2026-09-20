@@ -99,4 +99,21 @@ class ToolCallParserTest {
         assertTrue(events.filterIsInstance<AgentEvent.Call>().isEmpty())
         assertTrue(events.filterIsInstance<AgentEvent.Text>().isNotEmpty())
     }
+
+    @Test
+    fun `salvages a call whose key carries a stray escape`() {
+        // Verbatim shape from the Honor device: the model wrote write_file instead of
+        // create_file and escaped the closing quote of the path key, which makes the whole
+        // object unparseable even though the HTML in content was correct.
+        val parser = ToolCallParser()
+        val events = parser.feed(
+            "<tool_call>{\"name\": \"write_file\", \"arguments\": {\"path\\\": " +
+                "\"index.html\", \"content\": \"<h1>Hello</h1>\"}}</tool_call>",
+        ) + parser.finish()
+
+        val call = events.filterIsInstance<AgentEvent.Call>().single().call
+        assertEquals("write_file", call.name)
+        assertEquals("index.html", call.arguments.getString("path"))
+        assertEquals("<h1>Hello</h1>", call.arguments.getString("content"))
+    }
 }

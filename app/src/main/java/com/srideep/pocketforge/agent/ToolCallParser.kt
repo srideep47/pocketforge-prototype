@@ -152,7 +152,61 @@ class ToolCallParser(private val knownTools: Set<String> = DEFAULT_TOOLS) {
                 ?: JSONObject()
             return AgentEvent.Call(ToolCall(name, args, body))
         }
+        // Every strict parse failed. Before giving up on a turn that took a minute to
+        // generate, try to lift the call out by hand: the content is usually correct and
+        // the fault is one stray escape in a key, which JSON rejects wholesale.
+        salvage(trimmed)?.let { return it }
         return AgentEvent.Malformed(body, lastError)
+    }
+
+    /**
+     * Pulls a tool call out of not-quite-JSON.
+     *
+     * Observed on device: {"name": "write_file", "arguments": {"path\": "index.html",
+     * "content": "..."}} — a backslash before a key's closing quote. The HTML in `content`
+     * was perfect. Strict parsing throws all of it away, so this reads the name and the
+     * known argument keys directly and unescapes their values.
+     */
+    private fun salvage(text: String): AgentEvent? {
+        val name = NAME.find(text)?.groupValues?.get(1) ?: return null
+        if (name !in knownTools) return null
+
+        val arguments = JSONObject()
+        for (key in ARGUMENT_KEYS) {
+            stringValueOf(text, key)?.let { arguments.put(key, it) }
+        }
+        return AgentEvent.Call(ToolCall(name, arguments, text))
+    }
+
+    /**
+     * Reads one `"key": "value"` where value may itself contain escaped quotes. Scans to
+     * the closing quote honouring backslash escapes, rather than trusting a regex not to
+     * stop at the first `\"` inside a file's contents.
+     */
+    private fun stringValueOf(text: String, key: String): String? {
+        val marker = Regex(QUOTE + key + OPTIONAL_SLASH + QUOTE + COLON + QUOTE).find(text)
+            ?: return null
+        var i = marker.range.last + 1
+        val out = StringBuilder()
+        while (i < text.length) {
+            val c = text[i]
+            if (c == BACKSLASH && i + 1 < text.length) {
+                when (val next = text[i + 1]) {
+                    'n' -> out.append('\n')
+                    't' -> out.append('\t')
+                    'r' -> Unit
+                    '"' -> out.append('"')
+                    BACKSLASH -> out.append(BACKSLASH)
+                    else -> out.append(next)
+                }
+                i += 2
+                continue
+            }
+            if (c == '"') break
+            out.append(c)
+            i++
+        }
+        return out.toString().takeIf { it.isNotEmpty() }
     }
 
     /** Appends whatever quote and braces the model left open, so the object parses. */
@@ -191,13 +245,33 @@ class ToolCallParser(private val knownTools: Set<String> = DEFAULT_TOOLS) {
         const val OPEN_TAG = "<tool_call>"
         const val CLOSE_TAG = "</tool_call>"
 
+        // Regex fragments, spelled out because the pattern needs both a literal quote and
+        // an optional literal backslash — the stray escape small models leave before a
+        // key's closing quote, which is what makes the object unparseable.
+        const val QUOTE = "\""
+        const val OPTIONAL_SLASH = """\\?"""
+        const val COLON = """\s*:\s*"""
+        const val BACKSLASH = '\\'
+
+        val NAME = Regex(QUOTE + "name" + OPTIONAL_SLASH + QUOTE + COLON + QUOTE + "([A-Za-z_]+)" + QUOTE)
+        val ARGUMENT_KEYS = listOf(
+            "path",
+            "content",
+            "target",
+            "replacement",
+            "directory",
+            "project_path",
+        )
+
+        // The synonyms are here too: AgentTools maps them onto the real tools, so the
+        // parser has to recognise them or salvage would reject a call it could run.
         val DEFAULT_TOOLS = setOf(
-            "create_file",
-            "edit_file",
-            "read_file",
-            "list_files",
-            "start_dev_server",
-            "stop_dev_server",
+            "create_file", "write_file", "new_file", "save_file",
+            "edit_file", "replace_in_file", "update_file", "modify_file",
+            "read_file", "open_file",
+            "list_files", "list_directory",
+            "start_dev_server", "run_dev_server", "start_server",
+            "stop_dev_server", "stop_server",
         )
     }
 }

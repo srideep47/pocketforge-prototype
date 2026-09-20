@@ -37,6 +37,9 @@ class ModelDownloader(private val modelsDir: File) {
 
     fun download(model: CatalogModel): Flow<DownloadProgress> = flow {
         val target = model.directoryIn(modelsDir).apply { mkdirs() }
+        // Cleared up front so an interrupted re-download cannot leave a stale marker
+        // claiming the model is whole.
+        model.completionMarkerIn(modelsDir).delete()
 
         // Ask for every size up front so the progress bar means something.
         val sizes = LinkedHashMap<String, Long>()
@@ -68,6 +71,7 @@ class ModelDownloader(private val modelsDir: File) {
             done += maxOf(fileDone, size)
         }
 
+        model.completionMarkerIn(modelsDir).writeText(total.toString())
         emit(DownloadProgress(model.id, "", total, total, finished = true))
     }.flowOn(Dispatchers.IO)
 
