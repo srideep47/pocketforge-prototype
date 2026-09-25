@@ -2,6 +2,15 @@ package com.srideep.pocketforge.model
 
 import java.io.File
 
+/** What a model is used for. */
+enum class ModelRole {
+    /** Writes the code; the user picks one. */
+    CODER,
+
+    /** Reads photos of sketches for a coder that cannot see; used automatically when present. */
+    VISION,
+}
+
 /**
  * The models PocketForge ships with, and the files each one needs on disk.
  *
@@ -11,22 +20,40 @@ import java.io.File
  *
  * File lists and tokenizer names are per-model because the exports do not share a layout.
  *
- * Only the Qwen 3.5 pair is listed. Gemma 4 E2B downloads and loads, but generates the
- * <unused31> placeholder instead of text under our runtime settings — its export declares
- * mixed attention with a sliding window and does not tolerate the INT8 KV cache mode the
- * Qwen exports are happy with. It is left out rather than shipped broken; the per-model
- * fields here are what it would need to come back.
+ * Gemma 4 E2B is left out: it downloads and loads, but generates the <unused31> placeholder
+ * instead of text under our runtime settings.
  */
 enum class CatalogModel(
     val id: String,
     val displayName: String,
     val shortName: String,
     val subtitle: String,
-    val repo: String,
+    /** HuggingFace repo, or null for a model that is copied onto the phone over USB. */
+    val repo: String?,
     val tokenizerFile: String,
     val approxBytes: Long,
     val extraFiles: List<String>,
+    val role: ModelRole = ModelRole.CODER,
+    /** Whether the model takes images itself; a coder that does not uses the vision model. */
+    val seesImages: Boolean = false,
+    /**
+     * CPU threads. MoE models run hundreds of small expert matmuls per token, where thread
+     * synchronisation dominates: on Snapdragon 8 Elite, Ling decodes 50% faster on 4 threads
+     * than on 6, and 8 threads (which pulls in the slower cores) is slower still.
+     */
+    val threadNum: Int = 6,
 ) {
+    LING_3_TINY(
+        id = "Ling-3.0-tiny",
+        displayName = "Ling 3.0 Tiny",
+        shortName = "Ling",
+        subtitle = "7.9B MoE, 1.3B active. Twice the reasoning of Qwen 2B at similar speed.",
+        repo = null,
+        tokenizerFile = "tokenizer.mtok",
+        approxBytes = 5_401_000_000L,
+        extraFiles = listOf("embeddings_bf16.bin"),
+        threadNum = 4,
+    ),
     QWEN_2B(
         id = "Qwen3.5-2B",
         displayName = "Qwen 3.5 · 2B",
@@ -36,6 +63,7 @@ enum class CatalogModel(
         tokenizerFile = "tokenizer.txt",
         approxBytes = 1_385_000_000L,
         extraFiles = listOf("visual.mnn", "visual.mnn.weight"),
+        seesImages = true,
     ),
     QWEN_4B(
         id = "Qwen3.5-4B",
@@ -46,8 +74,23 @@ enum class CatalogModel(
         tokenizerFile = "tokenizer.txt",
         approxBytes = 2_833_000_000L,
         extraFiles = listOf("visual.mnn", "visual.mnn.weight"),
+        seesImages = true,
+    ),
+    QWEN_08B_VISION(
+        id = "Qwen3.5-0.8B",
+        displayName = "Qwen 3.5 · 0.8B vision",
+        shortName = "0.8B",
+        subtitle = "Reads photos of sketches for coders that cannot see images.",
+        repo = "taobao-mnn/Qwen3.5-0.8B-MNN",
+        tokenizerFile = "tokenizer.txt",
+        approxBytes = 543_000_000L,
+        extraFiles = listOf("visual.mnn", "visual.mnn.weight"),
+        role = ModelRole.VISION,
+        seesImages = true,
     ),
     ;
+
+    val sideloadOnly: Boolean get() = repo == null
 
     /**
      * What the runtime actually loads. The repos also carry `llm.mnn.json` (a multi-megabyte
@@ -77,10 +120,17 @@ enum class CatalogModel(
      */
     fun completionMarkerIn(modelsDir: File): File = File(directoryIn(modelsDir), ".complete")
 
-    fun isInstalledIn(modelsDir: File): Boolean = completionMarkerIn(modelsDir).isFile &&
-        requiredFiles.all { File(directoryIn(modelsDir), it).length() > 0L }
+    /**
+     * A USB-copied model has no downloader to write the marker, so for those every required
+     * file being present and non-empty is taken as installed.
+     */
+    fun isInstalledIn(modelsDir: File): Boolean =
+        (sideloadOnly || completionMarkerIn(modelsDir).isFile) &&
+            requiredFiles.all { File(directoryIn(modelsDir), it).length() > 0L }
 
     companion object {
         fun byId(id: String): CatalogModel? = entries.firstOrNull { it.id == id }
+
+        val vision: CatalogModel get() = QWEN_08B_VISION
     }
 }

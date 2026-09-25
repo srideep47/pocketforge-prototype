@@ -3,10 +3,11 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
-// Headers-only checkout of the MNN framework (llm.hpp, MNN/expr/*). The matching
-// prebuilt libMNN.so is vendored in src/main/jniLibs/arm64-v8a.
+// MNN 3.6.1 headers (llm.hpp, MNN/expr/*) are vendored in src/main/cpp/mnn to match the
+// prebuilt libMNN.so in src/main/jniLibs/arm64-v8a. Pass -PmnnSourceRoot=... to build
+// against a different MNN checkout instead.
 val mnnSourceRoot: String = (project.findProperty("mnnSourceRoot") as? String)
-    ?: error("Set mnnSourceRoot in gradle.properties (path to the MNN framework checkout)")
+    ?: file("src/main/cpp/mnn").invariantSeparatorsPath
 
 android {
     namespace = "com.srideep.pocketforge.engine.mnn"

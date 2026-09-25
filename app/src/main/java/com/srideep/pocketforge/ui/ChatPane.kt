@@ -7,7 +7,9 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,7 +33,11 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +48,9 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -58,19 +67,29 @@ import com.srideep.pocketforge.chat.StudioUiState
 import com.srideep.pocketforge.chat.ToolTrace
 import com.srideep.pocketforge.ui.theme.CodeColors
 
+/** Everything the composer can do besides typing. */
+class ComposerActions(
+    val onSend: () -> Unit,
+    val onStop: () -> Unit,
+    val onMic: () -> Unit,
+    val onToggleHandsFree: () -> Unit,
+    val onCamera: () -> Unit,
+    val onPickImage: () -> Unit,
+    val onClearImage: () -> Unit,
+)
+
 /**
  * The chat tab: transcript above, composer below.
  *
- * Voice appears in exactly one place — the mic dictates into the field. Sending stays a
- * separate tap, so a misheard prompt never reaches the model.
+ * The mic dictates into the field and sending stays a separate tap, so a misheard prompt
+ * never reaches the model — unless hands-free is on (long-press the mic), where speech is
+ * the whole interaction. The camera attaches a photo of a sketch or screenshot to build from.
  */
 @Composable
 fun ChatPane(
     state: StudioUiState,
     onInputChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onStop: () -> Unit,
-    onMic: () -> Unit,
+    actions: ComposerActions,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -84,6 +103,7 @@ fun ChatPane(
             EmptyChat(
                 modelReady = state.modelStatus == ModelStatus.READY,
                 onSuggestion = onInputChange,
+                onCamera = actions.onCamera,
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -99,17 +119,29 @@ fun ChatPane(
             }
         }
 
-        Composer(state, onInputChange, onSend, onStop, onMic)
+        state.metrics?.let { MetricsBar(it) }
+        Composer(state, onInputChange, actions)
     }
 }
 
 @Composable
 private fun MessageRow(message: ChatMessage) {
     when (message.role) {
-        Role.USER -> Row(
+        Role.USER -> Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            message.imagePath?.let { path ->
+                LocalImage(
+                    path = path,
+                    contentDescription = "Attached photo",
+                    modifier = Modifier
+                        .size(width = 180.dp, height = 220.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
+                )
+            }
             Text(
                 text = message.text,
                 style = MaterialTheme.typography.bodyMedium,
@@ -254,6 +286,7 @@ private fun ThinkingDots() {
 private fun EmptyChat(
     modelReady: Boolean,
     onSuggestion: (String) -> Unit,
+    onCamera: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val suggestions = listOf(
@@ -274,7 +307,8 @@ private fun EmptyChat(
         )
         Text(
             text = if (modelReady) {
-                "Describe a site. It gets written, served and previewed on this phone."
+                "Describe it, say it, or photograph a sketch. It gets written, served and " +
+                    "previewed on this phone, offline."
             } else {
                 "Open the chip menu in the top bar and download one."
             },
@@ -284,6 +318,29 @@ private fun EmptyChat(
         )
 
         if (modelReady) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .clickable(onClick = onCamera)
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+            ) {
+                Icon(
+                    Icons.Default.PhotoCamera,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = "  Photograph a sketch on paper",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             suggestions.forEach { suggestion ->
                 Text(
                     text = suggestion,
@@ -302,14 +359,15 @@ private fun EmptyChat(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Composer(
     state: StudioUiState,
     onInputChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onStop: () -> Unit,
-    onMic: () -> Unit,
+    actions: ComposerActions,
 ) {
+    var photoMenuOpen by remember { mutableStateOf(false) }
+
     Surface(color = MaterialTheme.colorScheme.surface) {
         Column {
             Box(
@@ -318,6 +376,42 @@ private fun Composer(
                     .height(1.dp)
                     .background(MaterialTheme.colorScheme.outline),
             )
+            state.attachedImage?.let { path ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp),
+                ) {
+                    LocalImage(
+                        path = path,
+                        contentDescription = "Photo to build from",
+                        maxSide = 256,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
+                    )
+                    Text(
+                        text = "The page will be built from this photo",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 12.dp),
+                    )
+                    IconButton(onClick = actions.onClearImage, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Remove photo", modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+            if (state.handsFree) {
+                Text(
+                    text = if (state.isListening) "Listening… speak your change" else "Hands-free: tap the mic and speak",
+                    fontFamily = CodeColors.mono,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 16.dp, top = 8.dp),
+                )
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -326,29 +420,70 @@ private fun Composer(
                     .padding(horizontal = 10.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                IconButton(
-                    onClick = onMic,
+                // Tap dictates; long-press toggles hands-free. A plain IconButton cannot take a
+                // long-press, so this is a Box with combinedClickable styled the same way.
+                Box(
+                    contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
                         .background(
-                            if (state.isListening) {
-                                MaterialTheme.colorScheme.error.copy(alpha = 0.16f)
-                            } else {
-                                Color.Transparent
+                            when {
+                                state.isListening -> MaterialTheme.colorScheme.error.copy(alpha = 0.16f)
+                                state.handsFree -> MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
+                                else -> Color.Transparent
                             },
+                        )
+                        .combinedClickable(
+                            onClick = actions.onMic,
+                            onLongClick = actions.onToggleHandsFree,
+                            onClickLabel = "Dictate",
+                            onLongClickLabel = "Toggle hands-free",
                         ),
                 ) {
                     Icon(
                         imageVector = Icons.Default.Mic,
                         contentDescription = "Dictate",
                         modifier = Modifier.size(20.dp),
-                        tint = if (state.isListening) {
+                        tint = if (state.isListening || state.handsFree) {
                             MaterialTheme.colorScheme.error
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
+                }
+
+                Box {
+                    IconButton(
+                        onClick = { photoMenuOpen = true },
+                        enabled = !state.isGenerating,
+                        modifier = Modifier.size(44.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoCamera,
+                            contentDescription = "Build from a photo",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DropdownMenu(expanded = photoMenuOpen, onDismissRequest = { photoMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Take a photo") },
+                            leadingIcon = { Icon(Icons.Default.PhotoCamera, contentDescription = null) },
+                            onClick = {
+                                photoMenuOpen = false
+                                actions.onCamera()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Choose an image") },
+                            leadingIcon = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                            onClick = {
+                                photoMenuOpen = false
+                                actions.onPickImage()
+                            },
+                        )
+                    }
                 }
 
                 TextField(
@@ -357,7 +492,7 @@ private fun Composer(
                     modifier = Modifier.weight(1f),
                     placeholder = {
                         Text(
-                            "Describe the site you want",
+                            if (state.attachedImage != null) "Anything to add? (optional)" else "Describe the site you want",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     },
@@ -373,9 +508,9 @@ private fun Composer(
                     ),
                 )
 
-                val enabled = state.isGenerating || state.input.isNotBlank()
+                val enabled = state.isGenerating || state.input.isNotBlank() || state.attachedImage != null
                 IconButton(
-                    onClick = if (state.isGenerating) onStop else onSend,
+                    onClick = if (state.isGenerating) actions.onStop else actions.onSend,
                     enabled = enabled,
                     modifier = Modifier
                         .padding(start = 6.dp)

@@ -18,6 +18,8 @@ data class GenerationStats(
     val generatedTokens: Int,
     val prefillMicros: Long,
     val decodeMicros: Long,
+    /** Vision-encoder time since the last [MnnLlmEngine.resetHistory]; cumulative, not per turn. */
+    val visionMicros: Long = 0L,
 ) {
     val decodeTokensPerSecond: Double
         get() = if (decodeMicros <= 0L) 0.0 else generatedTokens * 1_000_000.0 / decodeMicros
@@ -113,7 +115,7 @@ class MnnLlmEngine {
         if (current == 0L) return GenerationStats(0, 0, 0L, 0L)
         val raw = bridge.nativeLastStats(current)
         if (raw.size < 4) return GenerationStats(0, 0, 0L, 0L)
-        return GenerationStats(raw[0].toInt(), raw[1].toInt(), raw[2], raw[3])
+        return GenerationStats(raw[0].toInt(), raw[1].toInt(), raw[2], raw[3], raw.getOrElse(4) { 0L })
     }
 
     /** Asks the running decode loop to stop at its next token. */

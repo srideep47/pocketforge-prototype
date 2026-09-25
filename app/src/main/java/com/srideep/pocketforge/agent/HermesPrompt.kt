@@ -36,12 +36,71 @@ object HermesPrompt {
         Use only valid CSS values. Every CSS custom property you reference must be declared;
         for a simple page, prefer direct values over custom properties.
 
+        When the user gives no style, make it look like a finished product, not a template:
+        the system-ui font stack, a centred column no wider than 960px with 20px side padding,
+        one accent colour with a darker hover shade, spacing in multiples of 8px, 12px corner
+        radius, soft shadows, tap targets at least 44px tall, clear contrast, and short
+        transitions on interactive elements.
+
         Never explain the code before the <site> block. PocketForge writes it to index.html and
         starts the preview automatically. If the latest message is a <tool_response> saying the
         file was written, reply with one short completion sentence and do not emit another site.
     """.trimIndent()
 
     fun systemPrompt(): String = SYSTEM_PREAMBLE
+
+    /**
+     * The user turn the model actually sees.
+     *
+     * Each run starts a fresh conversation, so an edit request on its own reaches a model that
+     * has never seen the page: it rebuilds from scratch and "make the button orange" loses
+     * everything else. The current document therefore travels with every change request.
+     *
+     * [imageTag] is MNN's inline image reference (`<img>...</img>`), which its multimodal
+     * tokenizer swaps for vision embeddings before prefill.
+     */
+    fun userTurn(
+        request: String,
+        currentPage: String?,
+        imageTag: String?,
+        sketchDescription: String? = null,
+    ): String = buildString {
+        if (sketchDescription != null) {
+            append("The user photographed a hand-drawn sketch of the app. A vision model read it:\n<sketch>\n")
+            append(sketchDescription)
+            append(
+                "\n</sketch>\nBuild this as a working page. Keep every heading, label, input and button " +
+                    "the sketch lists, in the same order and arrangement, and make every control work.\n\n",
+            )
+        }
+        if (imageTag != null) {
+            append(imageTag)
+            append('\n')
+            append(
+                "The image is a sketch, wireframe or screenshot of the interface the user wants. " +
+                    "Rebuild its layout, sections, labels and controls as a working page. Read any " +
+                    "handwritten text in it, and make every control it shows actually work.\n\n",
+            )
+        }
+        if (currentPage != null) {
+            append("This is the current index.html:\n<current>\n")
+            append(currentPage)
+            append("\n</current>\n\n")
+            append(
+                "Apply the change below and return the complete updated document inside one " +
+                    "<site></site> block. Keep everything the change does not mention exactly as " +
+                    "it is.\n\nChange: ",
+            )
+        }
+        append(request)
+    }
+
+    /**
+     * What the image-bearing turn is replaced with once the model has answered it. The vision
+     * encoder would otherwise run again on every later round of the same task.
+     */
+    fun withoutImage(turn: String, imageTag: String): String =
+        turn.replace(imageTag, "[photo attached above]")
 
     fun retryAfterMalformed(): String =
         "The previous output could not be saved. Return one complete raw HTML document inside " +

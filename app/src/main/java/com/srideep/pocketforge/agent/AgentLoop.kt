@@ -56,11 +56,23 @@ class AgentLoop(
     private val maxNewTokensPerTurn: Int = 2048,
 ) {
 
-    fun run(userMessage: String): Flow<AgentUpdate> = flow {
+    /**
+     * @param currentPage the page being changed, or null to build a new one.
+     * @param imageTag an MNN `<img>` reference for a photo the page should be built from, for a
+     *   coder that can see images.
+     * @param sketchDescription the vision sidecar's reading of that photo, for one that cannot.
+     */
+    fun run(
+        userMessage: String,
+        currentPage: String? = null,
+        imageTag: String? = null,
+        sketchDescription: String? = null,
+    ): Flow<AgentUpdate> = flow {
         val parser = ToolCallParser()
+        val firstTurn = HermesPrompt.userTurn(userMessage, currentPage, imageTag, sketchDescription)
         val conversation = mutableListOf(
             ChatTurn("system", HermesPrompt.systemPrompt()),
-            ChatTurn("user", userMessage),
+            ChatTurn("user", firstTurn),
         )
         var malformedRetries = 0
         var incompleteRetries = 0
@@ -89,6 +101,10 @@ class AgentLoop(
                 emitEvent(event, pending)
             }
             emit(AgentUpdate.TurnStats(engine.lastStats()))
+            if (iteration == 0 && imageTag != null) {
+                // The photo has done its job; later rounds only need the text.
+                conversation[1] = ChatTurn("user", HermesPrompt.withoutImage(firstTurn, imageTag))
+            }
             if (pending.isEmpty()) {
                 SiteArtifact.extract(rawAssistant.toString())?.let { html ->
                     pending += ToolCall(

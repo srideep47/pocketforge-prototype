@@ -142,15 +142,42 @@ private fun ModelRow(
                 )
             }
 
-            when (model.state) {
-                ModelInstallState.NOT_DOWNLOADED -> Button(onClick = onDownload) {
+            when {
+                // Too large to host yet, so it is pushed with adb instead of downloaded.
+                model.state == ModelInstallState.NOT_DOWNLOADED && model.sideloadOnly -> Text(
+                    text = "Copy via USB",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+
+                // The vision helper is picked up automatically, so it never gets "Use".
+                model.isVision && model.state != ModelInstallState.NOT_DOWNLOADED &&
+                    model.state != ModelInstallState.DOWNLOADING -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Remove",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        text = "Ready",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                    )
+                }
+
+                model.state == ModelInstallState.NOT_DOWNLOADED -> Button(onClick = onDownload) {
                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                     Text("  " + gigabytes(model.approxBytes))
                 }
 
-                ModelInstallState.DOWNLOADING -> TextButton(onClick = onCancel) { Text("Pause") }
+                model.state == ModelInstallState.DOWNLOADING -> TextButton(onClick = onCancel) { Text("Pause") }
 
-                ModelInstallState.DOWNLOADED -> Row(verticalAlignment = Alignment.CenterVertically) {
+                model.state == ModelInstallState.DOWNLOADED -> Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onDelete) {
                         Icon(
                             Icons.Default.Delete,
@@ -165,7 +192,7 @@ private fun ModelRow(
                 // No primary button once it is loaded. It used to be "Remove", sitting
                 // exactly where "Use" had been a moment earlier, so the natural second
                 // tap deleted a multi-gigabyte download.
-                ModelInstallState.LOADED -> Row(verticalAlignment = Alignment.CenterVertically) {
+                else -> Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onDelete) {
                         Icon(
                             Icons.Default.Delete,

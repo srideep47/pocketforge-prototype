@@ -1,6 +1,8 @@
 package com.srideep.pocketforge.chat
 
 import android.app.Application
+import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -9,19 +11,28 @@ import com.srideep.pocketforge.agent.AgentTools
 import com.srideep.pocketforge.agent.AgentUpdate
 import com.srideep.pocketforge.engine.mnn.MnnLlmEngine
 import com.srideep.pocketforge.engine.mnn.ModelConfig
+import com.srideep.pocketforge.metrics.DeviceMetrics
 import com.srideep.pocketforge.model.CatalogModel
 import com.srideep.pocketforge.model.DownloadProgress
 import com.srideep.pocketforge.model.ModelDownloader
+import com.srideep.pocketforge.model.ModelRole
 import com.srideep.pocketforge.runtime.node.DevServerClient
+import com.srideep.pocketforge.vision.ImageInput
+import com.srideep.pocketforge.vision.PreparedImage
+import com.srideep.pocketforge.vision.VisionSidecar
 import com.srideep.pocketforge.voice.SpeechToText
 import com.srideep.pocketforge.workspace.ProjectTemplates
 import com.srideep.pocketforge.workspace.Workspace
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Single state holder for the studio: chat + agent, the workspace files, and the dev
@@ -33,8 +44,16 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val engine = MnnLlmEngine()
     private val devServer = DevServerClient(application)
     private val speech = SpeechToText(application)
+    private val device = DeviceMetrics(application)
+
+    /** Reads photos for coders that cannot see images. Loaded on first use, ~0.5 GB. */
+    private val sidecar = VisionSidecar()
 
     private val projectRoot = File(application.filesDir, "projects/site")
+
+    /** Photos live outside the project so they are never served or edited as site files. */
+    private val attachmentsDir = File(application.filesDir, "attachments")
+    private var attachment: PreparedImage? = null
     private val workspace = Workspace(projectRoot)
     private val tools = AgentTools(workspace, devServer)
     private val agent = AgentLoop(engine, tools)
@@ -50,6 +69,13 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private var runDecodeMicros = 0L
     private var runPromptTokens = 0
     private var runPrefillMicros = 0L
+    private var runVisionMicros = 0L
+
+    /** MNN's vision counter is cumulative until a reset, so turns are measured as deltas. */
+    private var lastVisionMicros = 0L
+    private var runStartedAt = 0L
+    private var firstTokenAt = 0L
+    private var metricsJob: Job? = null
 
     /** Downloads in flight, and the id of whatever the engine currently holds. */
     private val downloads = mutableMapOf<String, DownloadProgress>()
@@ -68,7 +94,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         // both undoes the action and leaves the agent editing a page it did not write.
         val seededMarker = File(application.filesDir, "projects/.seeded")
         if (!seededMarker.exists()) {
-            ProjectTemplates.starter("My Site").forEach { (path, content) ->
+            ProjectTemplates.starter(STARTER_NAME).forEach { (path, content) ->
                 workspace.write(path, content)
             }
             seededMarker.parentFile?.mkdirs()
@@ -117,6 +143,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             approxBytes = model.approxBytes,
             state = state,
             progress = inFlight?.fraction ?: 0f,
+            isVision = model.role == ModelRole.VISION,
+            sideloadOnly = model.sideloadOnly,
             progressLabel = inFlight?.let { progress ->
                 humanSize(progress.bytesDone) + " of " + humanSize(progress.bytesTotal)
             }.orEmpty(),
@@ -189,6 +217,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                         // Exports disagree on this: Qwen ships tokenizer.txt, Gemma 4
                         // ships tokenizer.mtok.
                         tokenizerFile = model.tokenizerFile,
+                        threadNum = model.threadNum,
                     ),
                 )
             }.getOrElse { error ->
@@ -199,7 +228,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             _state.value = _state.value.copy(
                 modelStatus = if (loaded) ModelStatus.READY else ModelStatus.FAILED,
                 status = if (loaded) {
-                    model.displayName + " ready · 32k context"
+                    model.displayName + " ready · " + ModelConfig.DEFAULT_CONTEXT_TOKENS / 1000 + "k context"
                 } else {
                     "Could not load " + model.displayName
                 },
@@ -222,31 +251,53 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun send() {
-        val prompt = _state.value.input.trim()
-        if (prompt.isEmpty() || _state.value.isGenerating) return
+        val image = attachment
+        val typed = _state.value.input.trim()
+        if ((typed.isEmpty() && image == null) || _state.value.isGenerating) return
         if (_state.value.modelStatus != ModelStatus.READY) {
             appendSystem("Load a model first.")
             return
         }
+        val prompt = typed.ifEmpty { "Build this as a working page." }
+        // A photo means "build what this shows", so it starts a page rather than editing one.
+        val currentPage = if (image == null) pageToEdit() else null
 
-        appendMessage(ChatMessage(id = nextMessageId++, role = Role.USER, text = prompt))
+        appendMessage(
+            ChatMessage(
+                id = nextMessageId++,
+                role = Role.USER,
+                text = prompt,
+                imagePath = image?.file?.absolutePath,
+            ),
+        )
         val assistantId = nextMessageId++
         appendMessage(ChatMessage(id = assistantId, role = Role.ASSISTANT, streaming = true))
-        _state.value = _state.value.copy(input = "", isGenerating = true)
+        attachment = null
+        _state.value = _state.value.copy(input = "", attachedImage = null, isGenerating = true)
 
         runTokens = 0
         runDecodeMicros = 0L
         runPromptTokens = 0
         runPrefillMicros = 0L
+        runVisionMicros = 0L
+        lastVisionMicros = engine.lastStats().visionMicros
+        startMetrics()
 
         agentJob = viewModelScope.launch {
             try {
-                agent.run(prompt).collect { update -> apply(assistantId, update) }
+                var imageTag = image?.mnnTag
+                var sketch: String? = null
+                if (image != null && !coderSeesImages()) {
+                    sketch = readSketch(assistantId, image) ?: return@launch
+                    imageTag = null
+                }
+                agent.run(prompt, currentPage, imageTag, sketch).collect { update -> apply(assistantId, update) }
             } catch (e: Exception) {
                 Log.e(TAG, "agent run failed", e)
                 updateMessage(assistantId) { it.copy(text = it.text + "\n\n" + e.message) }
             } finally {
                 updateMessage(assistantId) { it.copy(streaming = false) }
+                finishMetrics()
                 _state.value = _state.value.copy(
                     isGenerating = false,
                     status = throughputSummary(),
@@ -254,6 +305,52 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 refreshFiles()
             }
         }
+    }
+
+    private fun coderSeesImages(): Boolean =
+        loadedModelId?.let { CatalogModel.byId(it) }?.seesImages == true
+
+    /**
+     * Has the vision sidecar read the photo, shown as a step in the chat, and returns its
+     * description, or null (with the reason already shown) if it could not.
+     */
+    private suspend fun readSketch(assistantId: Long, image: PreparedImage): String? {
+        val vision = CatalogModel.vision
+        if (!vision.isInstalledIn(modelsDir)) {
+            updateMessage(assistantId) {
+                it.copy(text = "This model cannot see images. Download " + vision.displayName + " from the model menu to build from photos.")
+            }
+            return null
+        }
+        updateMessage(assistantId) { it.copy(tools = it.tools + ToolTrace("read_sketch", vision.shortName + " vision")) }
+        _state.value = _state.value.copy(status = "Reading the sketch…")
+        val result = runCatching {
+            val config = VisionSidecar.configFor(
+                modelDir = vision.directoryIn(modelsDir),
+                tmpDir = File(getApplication<Application>().cacheDir, "mnn-vision"),
+                tokenizerFile = vision.tokenizerFile,
+            )
+            check(sidecar.ensureLoaded(config)) { "could not load " + vision.displayName }
+            sidecar.read(image.mnnTag)
+        }
+        val reading = result.getOrElse { error ->
+            Log.e(TAG, "sketch reading failed", error)
+            finishTool(assistantId, "read_sketch", ok = false, detail = error.message ?: "failed")
+            updateMessage(assistantId) { it.copy(text = "Could not read the photo: " + (error.message ?: "unknown error")) }
+            return null
+        }
+        runVisionMicros += reading.visionMicros
+        finishTool(assistantId, "read_sketch", ok = true, detail = reading.description)
+        Log.i(TAG, "sketch read in " + reading.elapsedMs + " ms:\n" + reading.description)
+        return reading.description
+    }
+
+    private fun finishTool(assistantId: Long, name: String, ok: Boolean, detail: String) = updateMessage(assistantId) { message ->
+        val index = message.tools.indexOfLast { it.name == name && it.ok == null }
+        if (index < 0) return@updateMessage message
+        val updated = message.tools.toMutableList()
+        updated[index] = updated[index].copy(ok = ok, detail = detail)
+        message.copy(tools = updated)
     }
 
     fun stopGeneration() {
@@ -290,11 +387,20 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 runDecodeMicros += update.stats.decodeMicros
                 runPromptTokens += update.stats.promptTokens
                 runPrefillMicros += update.stats.prefillMicros
+                runVisionMicros += (update.stats.visionMicros - lastVisionMicros).coerceAtLeast(0L)
+                lastVisionMicros = update.stats.visionMicros
+                publishMetrics(running = true)
             }
 
-            is AgentUpdate.Progress -> _state.value = _state.value.copy(
-                status = "Generating… " + update.charsGenerated + " chars",
-            )
+            is AgentUpdate.Progress -> {
+                if (firstTokenAt == 0L) {
+                    firstTokenAt = SystemClock.elapsedRealtime()
+                    publishMetrics(running = true)
+                }
+                _state.value = _state.value.copy(
+                    status = "Generating… " + update.charsGenerated + " chars",
+                )
+            }
 
             is AgentUpdate.PreviewReady -> _state.value = _state.value.copy(
                 previewUrl = update.url,
@@ -308,6 +414,108 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
             AgentUpdate.Done -> Unit
         }
+    }
+
+    /**
+     * The page a text request should change, or null to build a fresh one.
+     *
+     * The untouched first-run starter counts as "nothing yet": treating it as the page to edit
+     * would turn "a landing page for a coffee shop" into a patch of the placeholder.
+     */
+    private fun pageToEdit(): String? {
+        if (!workspace.exists("index.html")) return null
+        val page = runCatching { workspace.read("index.html") }.getOrNull() ?: return null
+        val starter = ProjectTemplates.starter(STARTER_NAME)["index.html"]
+        return page.takeUnless { it.isBlank() || it.trim() == starter?.trim() }
+    }
+
+    // --- photo input -------------------------------------------------------------------
+
+    /** Prepares a camera capture or gallery pick to go out with the next message. */
+    fun attachImage(uri: Uri) {
+        viewModelScope.launch {
+            val prepared = runCatching {
+                withContext(Dispatchers.IO) { ImageInput.prepare(getApplication(), uri, attachmentsDir) }
+            }.getOrElse { error ->
+                Log.e(TAG, "could not read image", error)
+                appendSystem("Could not read that image: " + (error.message ?: "unknown error"))
+                return@launch
+            }
+            attachment = prepared
+            _state.value = _state.value.copy(
+                attachedImage = prepared.file.absolutePath,
+                status = "Photo attached · " + prepared.visionWidth + "x" + prepared.visionHeight,
+            )
+        }
+    }
+
+    fun clearAttachment() {
+        attachment = null
+        _state.value = _state.value.copy(attachedImage = null)
+    }
+
+    // --- metrics -----------------------------------------------------------------------
+
+    private fun startMetrics() {
+        runStartedAt = SystemClock.elapsedRealtime()
+        firstTokenAt = 0L
+        publishMetrics(running = true)
+        metricsJob?.cancel()
+        // Wall clock and memory move between MNN's per-turn counters, so they get a ticker.
+        metricsJob = viewModelScope.launch {
+            while (isActive) {
+                delay(500)
+                publishMetrics(running = true)
+            }
+        }
+    }
+
+    private fun finishMetrics() {
+        metricsJob?.cancel()
+        metricsJob = null
+        val final = publishMetrics(running = false)
+        // One line per run, so a benchmark sweep can be scripted off logcat.
+        Log.i(
+            TAG,
+            String.format(
+                java.util.Locale.US,
+                "run_metrics ttft_ms=%d vision_ms=%d prefill_tps=%.1f decode_tps=%.1f tokens=%d " +
+                    "elapsed_ms=%d peak_ram_mb=%d offline=%b airplane=%b thermal=%d",
+                final.timeToFirstTokenMs ?: -1L,
+                final.visionMs,
+                final.prefillTokensPerSecond,
+                final.decodeTokensPerSecond,
+                final.generatedTokens,
+                final.elapsedMs,
+                final.peakRamMb,
+                final.offline,
+                final.airplaneMode,
+                final.thermalStatus,
+            ),
+        )
+    }
+
+    private fun publishMetrics(running: Boolean): RunMetrics {
+        val snapshot = device.snapshot()
+        val metrics = RunMetrics(
+            running = running,
+            elapsedMs = SystemClock.elapsedRealtime() - runStartedAt,
+            timeToFirstTokenMs = firstTokenAt.takeIf { it > 0L }?.minus(runStartedAt),
+            visionMs = runVisionMicros / 1000L,
+            prefillTokensPerSecond = if (runPrefillMicros > 0L) {
+                runPromptTokens * 1_000_000.0 / runPrefillMicros
+            } else {
+                0.0
+            },
+            decodeTokensPerSecond = if (runDecodeMicros > 0L) runTokens * 1_000_000.0 / runDecodeMicros else 0.0,
+            generatedTokens = runTokens,
+            peakRamMb = snapshot.peakRamMb,
+            airplaneMode = snapshot.airplaneMode,
+            offline = snapshot.offline,
+            thermalStatus = snapshot.thermalStatus,
+        )
+        _state.value = _state.value.copy(metrics = metrics)
+        return metrics
     }
 
     private fun throughputSummary(): String {
@@ -456,8 +664,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             override fun onFinal(text: String) {
-                // Dictation fills the box; sending stays a deliberate tap.
+                // Dictation fills the box; sending stays a deliberate tap unless the user
+                // switched on hands-free, where the point is to change the page by voice alone.
                 _state.value = _state.value.copy(input = text, isListening = false, status = "")
+                if (_state.value.handsFree && text.isNotBlank()) send()
             }
 
             override fun onError(message: String) {
@@ -468,6 +678,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 _state.value = _state.value.copy(isListening = false)
             }
         })
+    }
+
+    fun toggleHandsFree() {
+        val on = !_state.value.handsFree
+        _state.value = _state.value.copy(
+            handsFree = on,
+            status = if (on) "Hands-free: speech sends automatically" else "Hands-free off",
+        )
     }
 
     fun stopDictation() {
@@ -494,10 +712,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         stopDictation()
         engine.stop()
         engine.shutdown()
+        sidecar.shutdown()
         super.onCleared()
     }
 
     private companion object {
         const val TAG = "StudioViewModel"
+        const val STARTER_NAME = "My Site"
     }
 }

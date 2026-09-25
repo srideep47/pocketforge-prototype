@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Headers come from an MNN framework checkout passed in by Gradle; the matching
 # libMNN.so is vendored under src/main/jniLibs/<abi>.
 if(NOT DEFINED MNN_SOURCE_ROOT)
-    message(FATAL_ERROR "MNN_SOURCE_ROOT not set (see gradle.properties)")
+    message(FATAL_ERROR "MNN_SOURCE_ROOT not set (see engine/mnn/build.gradle.kts)")
 endif()
 
 include_directories("${MNN_SOURCE_ROOT}/include")

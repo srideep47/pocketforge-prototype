@@ -206,11 +206,11 @@ extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeLastStats(
     JNIEnv* env, jobject, jlong handle) {
     Session* session = asSession(handle);
-    jlongArray out = env->NewLongArray(4);
+    jlongArray out = env->NewLongArray(5);
     if (out == nullptr) {
         return nullptr;
     }
-    jlong values[4] = {0, 0, 0, 0};
+    jlong values[5] = {0, 0, 0, 0, 0};
     if (session != nullptr && session->llm != nullptr) {
         // MNN keeps per-turn counters on the context; this is the only honest source
         // of throughput, since wall-clock in Kotlin also measures our own plumbing.
@@ -219,8 +219,10 @@ Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeLastStats(
         values[1] = context->gen_seq_len;
         values[2] = context->prefill_us;
         values[3] = context->decode_us;
+        // Unlike the others this accumulates until the next reset(), not per response().
+        values[4] = context->vision_us;
     }
-    env->SetLongArrayRegion(out, 0, 4, values);
+    env->SetLongArrayRegion(out, 0, 5, values);
     return out;
 }
 

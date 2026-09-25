@@ -34,7 +34,10 @@ internal class MnnLlmBridge {
         callback: TokenCallback,
     ): Boolean
 
-    /** [promptTokens, generatedTokens, prefillMicros, decodeMicros] for the last turn. */
+    /**
+     * [promptTokens, generatedTokens, prefillMicros, decodeMicros] for the last turn, then
+     * visionMicros accumulated since the last history reset.
+     */
     external fun nativeLastStats(handle: Long): LongArray
 
     external fun nativeStopGeneration(handle: Long)

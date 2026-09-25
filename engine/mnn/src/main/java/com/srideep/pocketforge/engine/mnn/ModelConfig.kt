@@ -36,7 +36,7 @@ data class ModelConfig(
     val memory: String = "low",
     val power: String = "high",
 
-    val maxAllTokens: Int = 10_000,
+    val maxAllTokens: Int = DEFAULT_CONTEXT_TOKENS,
     val maxNewTokens: Int = 4_096,
 
     val useMmap: Boolean = true,
@@ -60,23 +60,25 @@ data class ModelConfig(
     val attentionMode: Int = 8,
     val dynamicOption: Int = 0,
 
-    // Sampling follows what the model publishers validated against rather than generic
-    // engine advice. Qwen3.5's model card: temperature 1.0, topP 0.95, topK 20, min_p 0,
-    // repetition_penalty 1.0 (off), presence_penalty 1.5.
+    // Sampling follows Qwen3.5's model card for precise coding, not its general-chat preset.
+    // The chat preset (temperature 1.0, presence_penalty 1.5) was used first and it corrupts
+    // code: presence penalty taxes every token already seen, and code must repeat its
+    // identifiers, so a 2B started writing `vluue`, `dispil` and `button'value=` in the same
+    // page that declared `value` and `display`. The coding preset keeps presence at 0.
     //
-    // Cold sampling is actively harmful here. Dropping temperature to 0.25 to make code
-    // generation "more deterministic" put a 2B into a degenerate repetition loop that ran
-    // until it hit the token ceiling; near-greedy decoding is the classic trigger.
-    val temperature: Float = 1.0f,
+    // Cold sampling is still harmful. Dropping temperature to 0.25 put a 2B into a degenerate
+    // repetition loop that ran to the token ceiling; near-greedy decoding is the classic
+    // trigger. 0.6 plus MNN's n-gram penalty below keeps output varied without the tax.
+    val temperature: Float = 0.6f,
     val topP: Float = 0.95f,
     val topK: Int = 20,
     val minP: Float = 0.0f,
     val tfsZ: Float = 1.0f,
     val typical: Float = 0.95f,
-    /** Multiplicative repetition penalty; the publishers ship this off and lean on presence. */
+    /** Multiplicative repetition penalty; off, for the same reason as presence below. */
     val penalty: Float = 1.0f,
-    /** Additive per-token-seen penalty — Qwen3.5's own recommended anti-loop control. */
-    val presencePenalty: Float = 1.5f,
+    /** Additive per-token-seen penalty. Off: it punishes the repetition code depends on. */
+    val presencePenalty: Float = 0.0f,
     val nGram: Int = 8,
     val nGramFactor: Float = 1.02f,
 
@@ -149,6 +151,11 @@ data class ModelConfig(
             val context = jinja.optJSONObject("context") ?: JSONObject().also { jinja.put("context", it) }
             context.put("enable_thinking", enableThinking)
         }
+    }
+
+    companion object {
+        /** Prompt plus reply budget. A full page edit (current page in, new page out) fits. */
+        const val DEFAULT_CONTEXT_TOKENS = 10_000
     }
 
     /**

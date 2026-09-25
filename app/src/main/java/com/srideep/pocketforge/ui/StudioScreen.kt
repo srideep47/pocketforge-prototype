@@ -64,6 +64,10 @@ class StudioActions(
     val onSend: () -> Unit,
     val onStop: () -> Unit,
     val onMic: () -> Unit,
+    val onToggleHandsFree: () -> Unit,
+    val onCamera: () -> Unit,
+    val onPickImage: () -> Unit,
+    val onClearImage: () -> Unit,
     val onOpenFile: (String) -> Unit,
     val onEditorChange: (String) -> Unit,
     val onSaveFile: () -> Unit,
@@ -174,9 +178,15 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                     StudioTab.CHAT -> ChatPane(
                         state = state,
                         onInputChange = actions.onInputChange,
-                        onSend = actions.onSend,
-                        onStop = actions.onStop,
-                        onMic = actions.onMic,
+                        actions = ComposerActions(
+                            onSend = actions.onSend,
+                            onStop = actions.onStop,
+                            onMic = actions.onMic,
+                            onToggleHandsFree = actions.onToggleHandsFree,
+                            onCamera = actions.onCamera,
+                            onPickImage = actions.onPickImage,
+                            onClearImage = actions.onClearImage,
+                        ),
                         modifier = Modifier.weight(1f),
                     )
 

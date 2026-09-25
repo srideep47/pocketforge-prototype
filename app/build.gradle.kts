@@ -24,6 +24,10 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            // Installs beside a release or differently-signed build instead of replacing it,
+            // so a dev install never costs the gigabytes of models the other one downloaded.
+            applicationIdSuffix = ".dev"
+            resValue("string", "app_name", "PocketForge Dev")
         }
         release {
             isMinifyEnabled = false
