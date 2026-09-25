@@ -16,6 +16,7 @@ import com.srideep.pocketforge.model.CatalogModel
 import com.srideep.pocketforge.model.DownloadProgress
 import com.srideep.pocketforge.model.ModelDownloader
 import com.srideep.pocketforge.model.ModelRole
+import com.srideep.pocketforge.preview.PageSnapshot
 import com.srideep.pocketforge.runtime.node.DevServerClient
 import com.srideep.pocketforge.vision.ImageInput
 import com.srideep.pocketforge.vision.PreparedImage
@@ -24,9 +25,11 @@ import com.srideep.pocketforge.voice.SpeechToText
 import com.srideep.pocketforge.workspace.ProjectTemplates
 import com.srideep.pocketforge.workspace.Workspace
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -291,12 +294,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     sketch = readSketch(assistantId, image) ?: return@launch
                     imageTag = null
                 }
-                agent.run(prompt, currentPage, imageTag, sketch).collect { update -> apply(assistantId, update) }
+                val pageBefore = currentIndex()
+                val wrote = runAgent(assistantId, agent.run(prompt, currentPage, imageTag, sketch))
+                if (wrote && currentIndex() != pageBefore) checkRender(assistantId, goal = typed.ifEmpty { null })
             } catch (e: Exception) {
                 Log.e(TAG, "agent run failed", e)
                 updateMessage(assistantId) { it.copy(text = it.text + "\n\n" + e.message) }
             } finally {
-                updateMessage(assistantId) { it.copy(streaming = false) }
+                // trimEnd: a fix round that ends silently leaves the separator it was given.
+                updateMessage(assistantId) { it.copy(text = it.text.trimEnd(), streaming = false) }
                 finishMetrics()
                 _state.value = _state.value.copy(
                     isGenerating = false,
@@ -325,12 +331,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         updateMessage(assistantId) { it.copy(tools = it.tools + ToolTrace("read_sketch", vision.shortName + " vision")) }
         _state.value = _state.value.copy(status = "Reading the sketch…")
         val result = runCatching {
-            val config = VisionSidecar.configFor(
-                modelDir = vision.directoryIn(modelsDir),
-                tmpDir = File(getApplication<Application>().cacheDir, "mnn-vision"),
-                tokenizerFile = vision.tokenizerFile,
-            )
-            check(sidecar.ensureLoaded(config)) { "could not load " + vision.displayName }
+            loadSidecar(vision)
             sidecar.read(image.mnnTag)
         }
         val reading = result.getOrElse { error ->
@@ -345,11 +346,87 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         return reading.description
     }
 
-    private fun finishTool(assistantId: Long, name: String, ok: Boolean, detail: String) = updateMessage(assistantId) { message ->
+    /** Streams one agent run into the message; true if it ended with index.html written. */
+    private suspend fun runAgent(assistantId: Long, run: Flow<AgentUpdate>): Boolean {
+        var done = false
+        run.collect { update ->
+            if (update == AgentUpdate.Done) done = true
+            apply(assistantId, update)
+        }
+        return done
+    }
+
+    private fun currentIndex(): String? = runCatching { workspace.read("index.html") }.getOrNull()
+
+    /**
+     * Visual self-check: screenshots the page the agent just wrote, asks the vision sidecar
+     * whether it looks right, and gives the agent one chance to fix what it names.
+     *
+     * No coder ever sees its own output, so text clipped by a fixed height or a button under
+     * another one used to reach the user unnoticed. Coders that see images still go through
+     * the sidecar: they would need the screenshot in a new prompt, and the sidecar is cheaper.
+     * It is skipped, not offered, when the vision model is not installed. One fix round at
+     * most: a 0.8B critic is noisy, and chasing its every remark would loop or make the page
+     * worse.
+     */
+    private suspend fun checkRender(assistantId: Long, goal: String?) {
+        val vision = CatalogModel.vision
+        if (!vision.isInstalledIn(modelsDir)) return
+        val url = _state.value.previewUrl ?: return
+        updateMessage(assistantId) { it.copy(tools = it.tools + ToolTrace("check_render", vision.shortName + " vision")) }
+        _state.value = _state.value.copy(status = "Checking the page…")
+        val check = try {
+            val shot = PageSnapshot.capture(getApplication(), url, attachmentsDir)
+                ?: error("could not render the page")
+            loadSidecar(vision)
+            sidecar.inspect(shot.mnnTag, goal)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The page is already written; a check that cannot run just ends the run as before.
+            Log.w(TAG, "render check failed", e)
+            finishTool(assistantId, "check_render", ok = false, detail = e.message ?: "failed")
+            return
+        }
+        runVisionMicros += check.visionMicros
+        publishMetrics(running = true)
+        Log.i(TAG, "render checked in " + check.elapsedMs + " ms:\n" + check.answers)
+        val verdict = check.verdict
+        finishTool(
+            assistantId,
+            "check_render",
+            ok = true,
+            detail = verdict.summary(),
+            summary = if (verdict.hasProblems) "fixing: " + verdict.summary() else "looks right",
+        )
+        if (!verdict.hasProblems) return
+
+        val page = pageToEdit() ?: return
+        _state.value = _state.value.copy(status = "Fixing what the check found…")
+        updateMessage(assistantId) { if (it.text.isBlank()) it else it.copy(text = it.text + "\n\n") }
+        runAgent(assistantId, agent.run(verdict.fixRequest(), page))
+    }
+
+    private suspend fun loadSidecar(vision: CatalogModel) {
+        val config = VisionSidecar.configFor(
+            modelDir = vision.directoryIn(modelsDir),
+            tmpDir = File(getApplication<Application>().cacheDir, "mnn-vision"),
+            tokenizerFile = vision.tokenizerFile,
+        )
+        check(sidecar.ensureLoaded(config)) { "could not load " + vision.displayName }
+    }
+
+    private fun finishTool(
+        assistantId: Long,
+        name: String,
+        ok: Boolean,
+        detail: String,
+        summary: String? = null,
+    ) = updateMessage(assistantId) { message ->
         val index = message.tools.indexOfLast { it.name == name && it.ok == null }
         if (index < 0) return@updateMessage message
         val updated = message.tools.toMutableList()
-        updated[index] = updated[index].copy(ok = ok, detail = detail)
+        updated[index] = updated[index].copy(ok = ok, detail = detail, summary = summary ?: updated[index].summary)
         message.copy(tools = updated)
     }
 
