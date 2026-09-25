@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.srideep.pocketforge.KeepAliveService
 import com.srideep.pocketforge.agent.AgentLoop
 import com.srideep.pocketforge.agent.AgentTools
 import com.srideep.pocketforge.agent.AgentUpdate
@@ -196,6 +197,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         cancelDownload(id)
         if (loadedModelId == model.id) {
             loadedModelId = null
+            KeepAliveService.stop(getApplication())
             viewModelScope.launch { engine.release() }
             _state.value = _state.value.copy(modelStatus = ModelStatus.MISSING, modelName = null)
         }
@@ -221,6 +223,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                         // ships tokenizer.mtok.
                         tokenizerFile = model.tokenizerFile,
                         threadNum = model.threadNum,
+                        prefillChunk = model.prefillChunk,
+                        maxAllTokens = model.contextTokens,
                     ),
                 )
             }.getOrElse { error ->
@@ -228,10 +232,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 false
             }
             loadedModelId = if (loaded) model.id else null
+            if (loaded) {
+                KeepAliveService.start(getApplication(), model.displayName + " loaded")
+            } else {
+                KeepAliveService.stop(getApplication())
+            }
             _state.value = _state.value.copy(
                 modelStatus = if (loaded) ModelStatus.READY else ModelStatus.FAILED,
                 status = if (loaded) {
-                    model.displayName + " ready · " + ModelConfig.DEFAULT_CONTEXT_TOKENS / 1000 + "k context"
+                    model.displayName + " ready · " + model.contextTokens / 1000 + "k context"
                 } else {
                     "Could not load " + model.displayName
                 },
@@ -790,6 +799,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         engine.stop()
         engine.shutdown()
         sidecar.shutdown()
+        KeepAliveService.stop(getApplication())
         super.onCleared()
     }
 

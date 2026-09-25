@@ -1,5 +1,6 @@
 package com.srideep.pocketforge.model
 
+import com.srideep.pocketforge.engine.mnn.ModelConfig
 import java.io.File
 
 /** What a model is used for. */
@@ -42,6 +43,10 @@ enum class CatalogModel(
      * than on 6, and 8 threads (which pulls in the slower cores) is slower still.
      */
     val threadNum: Int = 6,
+    /** Prefill block size, 0 for one pass; see ModelConfig.prefillChunk. */
+    val prefillChunk: Int = 0,
+    /** Prompt plus reply budget; smaller means a smaller attention cache. */
+    val contextTokens: Int = ModelConfig.DEFAULT_CONTEXT_TOKENS,
 ) {
     LING_3_TINY(
         id = "Ling-3.0-tiny",
@@ -53,6 +58,11 @@ enum class CatalogModel(
         approxBytes = 5_401_000_000L,
         extraFiles = listOf("embeddings_bf16.bin"),
         threadNum = 4,
+        // Loaded, this model plus the app runs at ~5.5 GB, and one-pass prefill of a 700-token
+        // prompt then failed an allocation on device. Blocks of 128 cut the prefill peak by
+        // ~400 MB, and an 8k budget shrinks the six MLA layers' KV cache.
+        prefillChunk = 128,
+        contextTokens = 8_192,
     ),
     QWEN_2B(
         id = "Qwen3.5-2B",

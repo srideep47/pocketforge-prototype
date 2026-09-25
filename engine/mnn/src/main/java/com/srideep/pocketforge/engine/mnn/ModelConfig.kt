@@ -37,6 +37,12 @@ data class ModelConfig(
     val power: String = "high",
 
     val maxAllTokens: Int = DEFAULT_CONTEXT_TOKENS,
+    /**
+     * Prefill block size in tokens, 0 for one pass. MNN sizes its temporary buffers for the
+     * whole prompt at once, which on a 5.5 GB MoE model inside the app process ran out of
+     * memory ("Scudo ERROR: internal map failure") on a 700-token prompt. Blocks cap the peak.
+     */
+    val prefillChunk: Int = 0,
     val maxNewTokens: Int = 4_096,
 
     val useMmap: Boolean = true,
@@ -113,6 +119,7 @@ data class ModelConfig(
             put("power", power)
 
             put("max_all_tokens", maxAllTokens)
+            if (prefillChunk > 0) put("chunk", prefillChunk) else remove("chunk")
             put("max_new_tokens", maxNewTokens)
 
             put("use_mmap", useMmap)

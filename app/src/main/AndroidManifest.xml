@@ -6,6 +6,11 @@
     <!-- The metrics bar shows whether the phone is offline while the model works. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Keeps a loaded model's process alive while the app is in the background (KeepAliveService). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Dictation in the chat input bar. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- The on-device recognizer lives in another app. -->
@@ -48,6 +53,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps an on-device language model loaded while the user switches apps, e.g. to take a photo of a sketch." />
+        </service>
 
         <!-- Hands the system camera a file to write the capture into. -->
         <provider
