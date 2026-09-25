@@ -63,22 +63,15 @@ class VisionSidecar {
      * describes the screen instead of judging it, and a description cannot be told apart from
      * a complaint. A leading yes/no can.
      *
-     * @param goal what the user asked for, or null to check the layout only (a photo with no
-     *   typed request has no words to compare against).
      */
-    suspend fun inspect(imageTag: String, goal: String?): RenderCheck {
+    suspend fun inspect(imageTag: String): RenderCheck {
         val started = System.currentTimeMillis()
         engine.resetHistory()
         val visionBefore = engine.lastStats().visionMicros
-        // Long requests make long questions, and this model rambles on long questions.
-        val shortGoal = goal?.trim()?.trimEnd('.', '?', '!')?.take(MAX_GOAL_CHARS)?.takeIf { it.isNotEmpty() }
-        val questions = listOfNotNull(
-            LAYOUT_QUESTION,
-            shortGoal?.let { "Does the screen show: $it? Answer yes or no, then what is missing." },
-        )
+        val questions = listOf(LAYOUT_QUESTION, MESSY_QUESTION)
         val answers = ask(imageTag, questions, MAX_TOKENS_PER_CHECK)
         return RenderCheck(
-            verdict = RenderVerdict.parse(answers[0], answers.getOrNull(1), shortGoal),
+            verdict = RenderVerdict.parse(answers[0], answers.getOrNull(1)),
             answers = questions.zip(answers).joinToString("\n") { (q, a) -> "Q: $q\nA: $a" },
             visionMicros = (engine.lastStats().visionMicros - visionBefore).coerceAtLeast(0L),
             elapsedMs = System.currentTimeMillis() - started,
@@ -119,9 +112,12 @@ class VisionSidecar {
             "Is anything overlapping, cut off, unreadable or empty on this screen? Answer yes or no, " +
                 "then name it in one short sentence."
 
+        /** See [RenderVerdict.parse] for why these two. */
+        private const val MESSY_QUESTION =
+            "Is this screen broken or messy? Answer yes or no, then say what is wrong in one short sentence."
+
         /** A verdict and one sentence; a cap also stops a rambling answer early. */
         private const val MAX_TOKENS_PER_CHECK = 80
-        private const val MAX_GOAL_CHARS = 160
         private val THINK = Regex("(?s)<think>.*?</think>")
 
         /**

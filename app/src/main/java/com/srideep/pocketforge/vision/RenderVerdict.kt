@@ -31,31 +31,32 @@ data class RenderVerdict(val problems: List<String>) {
          * starts with a reflexive "Yes" and then reports no problem at all.
          */
         private val REASSURANCE = Regex(
-            """\b(nothing|no (issues?|problems?)|looks? (fine|good|correct|clean|great)|all (the )?(text|content|elements?) (is|are) (visible|readable))\b""",
+            """\b(nothing|no (issues?|problems?)|not (broken|messy)|looks? (fine|good|correct|clean|great)|all (the )?(text|content|elements?) (is|are) (visible|readable))\b""",
             RegexOption.IGNORE_CASE,
         )
 
         private const val MAX_DETAIL_CHARS = 200
 
         /**
-         * @param layoutAnswer answer to "is anything overlapping, cut off, unreadable or empty?";
-         *   "yes" is a problem.
-         * @param goalAnswer answer to "does the screen show <goal>?", or null if not asked;
-         *   "no" is a problem.
+         * Both questions are phrased so that "yes" means a problem.
+         *
+         * They were chosen by testing on screenshots of a broken page, a page cut off at the
+         * edge and a clean page: "is anything overlapping, cut off, unreadable or empty?" caught
+         * the cut-off page, "is this screen broken or messy?" caught the broken one, and both
+         * passed the clean page. A third question, "does the screen show <request>?", was
+         * dropped: it answered "No, the screen is empty" for the clean page, and a false "no"
+         * there makes the coder rewrite a page that was fine.
+         *
+         * @param layoutAnswer answer to the overlap/cut-off question.
+         * @param messyAnswer answer to the broken/messy question, or null if not asked.
          */
-        fun parse(layoutAnswer: String, goalAnswer: String?, goal: String?): RenderVerdict {
+        fun parse(layoutAnswer: String, messyAnswer: String?): RenderVerdict {
             val problems = mutableListOf<String>()
-            val (layoutYes, layoutDetail) = leadingYesNo(layoutAnswer)
-            // A bare "yes" names nothing to fix, and small models say yes to most questions.
-            if (layoutYes == true && layoutDetail.isNotEmpty() && !REASSURANCE.containsMatchIn(layoutDetail)) {
-                problems += layoutDetail
-            }
-            if (goalAnswer != null) {
-                val (goalYes, goalDetail) = leadingYesNo(goalAnswer)
-                if (goalYes == false && !REASSURANCE.containsMatchIn(goalDetail)) {
-                    // A bare "no" is still specific here: the goal itself says what is missing.
-                    val missing = goalDetail.ifEmpty { goal?.let { "it does not show: $it" }.orEmpty() }
-                    if (missing.isNotEmpty()) problems += missing
+            for (answer in listOfNotNull(layoutAnswer, messyAnswer)) {
+                val (yes, detail) = leadingYesNo(answer)
+                // A bare "yes" names nothing to fix, and small models say yes to most questions.
+                if (yes == true && detail.isNotEmpty() && !REASSURANCE.containsMatchIn(detail)) {
+                    problems += detail
                 }
             }
             return RenderVerdict(problems)

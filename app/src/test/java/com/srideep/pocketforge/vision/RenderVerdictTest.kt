@@ -9,61 +9,58 @@ import org.junit.Test
 class RenderVerdictTest {
     @Test
     fun `layout yes with a named problem needs a fix`() {
-        val verdict = RenderVerdict.parse("Yes, the title text is cut off at the right edge.", null, null)
+        val verdict = RenderVerdict.parse("Yes, the title text is cut off at the right edge.", null)
         assertEquals(listOf("the title text is cut off at the right edge"), verdict.problems)
         assertTrue(verdict.fixRequest().contains("the title text is cut off"))
     }
 
+    // The three answers below are the 0.8B model's real replies on test screenshots.
     @Test
-    fun `layout no is clean`() {
-        assertFalse(RenderVerdict.parse("No, everything is readable.", "Yes.", "a todo list").hasProblems)
+    fun `broken page is caught by the messy question`() {
+        val verdict = RenderVerdict.parse(
+            "No, nothing is overlapped, cut off, unreadable or empty.",
+            "Yes, the screen has a lot of errors in numbers and shapes that make it look like broken math input.",
+        )
+        assertEquals(1, verdict.problems.size)
+        assertTrue(verdict.problems[0].startsWith("the screen has a lot of errors"))
+    }
+
+    @Test
+    fun `clean page passes both questions`() {
+        val verdict = RenderVerdict.parse(
+            "No, nothing is overlapping, cut off or unreadable on the screen.",
+            "No, it's a clean and well-organized interface with the math function clearly labeled.",
+        )
+        assertFalse(verdict.hasProblems)
     }
 
     @Test
     fun `bare yes names nothing and is not acted on`() {
-        assertFalse(RenderVerdict.parse("Yes.", null, null).hasProblems)
+        assertFalse(RenderVerdict.parse("Yes.", "Yes").hasProblems)
     }
 
     @Test
     fun `yes followed by reassurance is not a problem`() {
-        assertFalse(RenderVerdict.parse("Yes, nothing is overlapping and it looks fine.", null, null).hasProblems)
+        assertFalse(RenderVerdict.parse("Yes, nothing is overlapping and it looks fine.", null).hasProblems)
+        assertFalse(RenderVerdict.parse("No.", "Yes, it is not broken or messy.").hasProblems)
     }
 
     @Test
     fun `unclear answers never trigger a fix`() {
         val verdict = RenderVerdict.parse(
             "The screen shows a calculator with a display and buttons.",
-            "The screen shows a calculator.",
-            "a calculator",
+            "It is a calculator.",
         )
         assertFalse(verdict.hasProblems)
-    }
-
-    @Test
-    fun `goal no with detail uses the detail`() {
-        val verdict = RenderVerdict.parse("No.", "No, the add button is missing.", "a todo list with an add button")
-        assertEquals(listOf("the add button is missing"), verdict.problems)
-    }
-
-    @Test
-    fun `bare goal no falls back to the goal`() {
-        val verdict = RenderVerdict.parse("No.", "No", "a login form")
-        assertEquals(listOf("it does not show: a login form"), verdict.problems)
-    }
-
-    @Test
-    fun `no nothing is missing is not a problem`() {
-        assertFalse(RenderVerdict.parse("No.", "No, nothing is missing.", "a login form").hasProblems)
     }
 
     @Test
     fun `both problems are collected`() {
         val verdict = RenderVerdict.parse(
             "**Yes** - the buttons overlap the footer.",
-            "No, there is no search box.",
-            "a search page",
+            "Yes, the keypad is squashed into one column.",
         )
-        assertEquals(listOf("the buttons overlap the footer", "there is no search box"), verdict.problems)
+        assertEquals(listOf("the buttons overlap the footer", "the keypad is squashed into one column"), verdict.problems)
     }
 
     @Test

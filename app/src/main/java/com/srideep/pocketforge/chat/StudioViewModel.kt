@@ -296,7 +296,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 val pageBefore = currentIndex()
                 val wrote = runAgent(assistantId, agent.run(prompt, currentPage, imageTag, sketch))
-                if (wrote && currentIndex() != pageBefore) checkRender(assistantId, goal = typed.ifEmpty { null })
+                if (wrote && currentIndex() != pageBefore) checkRender(assistantId)
             } catch (e: Exception) {
                 Log.e(TAG, "agent run failed", e)
                 updateMessage(assistantId) { it.copy(text = it.text + "\n\n" + e.message) }
@@ -369,7 +369,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
      * most: a 0.8B critic is noisy, and chasing its every remark would loop or make the page
      * worse.
      */
-    private suspend fun checkRender(assistantId: Long, goal: String?) {
+    private suspend fun checkRender(assistantId: Long) {
         val vision = CatalogModel.vision
         if (!vision.isInstalledIn(modelsDir)) return
         val url = _state.value.previewUrl ?: return
@@ -379,7 +379,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             val shot = PageSnapshot.capture(getApplication(), url, attachmentsDir)
                 ?: error("could not render the page")
             loadSidecar(vision)
-            sidecar.inspect(shot.mnnTag, goal)
+            sidecar.inspect(shot.mnnTag)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
