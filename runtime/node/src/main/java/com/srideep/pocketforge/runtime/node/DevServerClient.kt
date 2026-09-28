@@ -11,8 +11,14 @@ import android.os.Looper
 import android.os.Message
 import android.os.Messenger
 import java.io.File
+import java.net.InetSocketAddress
+import java.net.Socket
 import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -73,6 +79,10 @@ class DevServerClient(private val context: Context) {
         }
         return try {
             service.send(request)
+            // MSG_START only asks :node to boot Node; the server listens a few seconds later.
+            // Callers load the URL straight away, and a load that races the boot fails with a
+            // connection error, so report running only once the port accepts a connection.
+            if (!awaitListening(port)) return fail("dev server did not start listening on port $port")
             _state.value = _state.value.copy(
                 running = true,
                 url = "http://localhost:$port",
@@ -84,6 +94,17 @@ class DevServerClient(private val context: Context) {
             fail(e.message ?: "node process is not reachable")
         }
     }
+
+    private suspend fun awaitListening(port: Int): Boolean = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(LISTEN_TIMEOUT_MS) {
+            while (!acceptsConnections(port)) delay(150)
+            true
+        } ?: false
+    }
+
+    private fun acceptsConnections(port: Int): Boolean = runCatching {
+        Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 250) }
+    }.isSuccess
 
     /** Stops the server and lets the `:node` process exit. */
     fun stop() {
@@ -137,5 +158,10 @@ class DevServerClient(private val context: Context) {
     private fun fail(reason: String): DevServerState {
         _state.value = DevServerState(error = reason)
         return _state.value
+    }
+
+    private companion object {
+        /** Cold-starting Node on a phone takes a few seconds; well past that, it is not coming. */
+        const val LISTEN_TIMEOUT_MS = 15_000L
     }
 }
