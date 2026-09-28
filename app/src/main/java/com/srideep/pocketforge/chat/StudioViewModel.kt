@@ -851,8 +851,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private fun nameFromRequest(): String? {
         val request = _state.value.messages.lastOrNull { it.role == Role.USER }?.text ?: return null
         val words = request
-            .replace(Regex("(?i)^(please\s+)?(build|create|make|recreate|design|write)\s+(me\s+)?(a|an|the)?\s*"), "")
-            .split(Regex("[^\p{L}\p{N}]+"))
+            .replace(Regex("""(?i)^(please\s+)?(build|create|make|recreate|design|write)\s+(me\s+)?(a|an|the)?\s*"""), "")
+            .split(Regex("""[^\p{L}\p{N}]+"""))
             .filter { it.isNotEmpty() && it.lowercase() !in NAME_FILLER }
             .take(2)
         return words.takeIf { it.isNotEmpty() }?.joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
