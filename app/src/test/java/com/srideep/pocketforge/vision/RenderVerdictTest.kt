@@ -79,4 +79,13 @@ class RenderVerdictTest {
         val broken = clean.withScriptErrors(listOf("Uncaught ReferenceError: total is not defined (line 42)"))
         assertEquals(listOf("the script fails: Uncaught ReferenceError: total is not defined (line 42)"), broken.problems)
     }
+
+    @Test
+    fun `a yes that describes a clean screen is not a problem`() {
+        val verdict = RenderVerdict.parse(
+            "No",
+            "Yes, the image has a clean layout with no overlaps, cuts, or unreadables.",
+        )
+        assertEquals(false, verdict.hasProblems)
+    }
 }

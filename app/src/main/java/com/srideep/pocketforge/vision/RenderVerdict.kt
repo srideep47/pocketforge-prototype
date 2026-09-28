@@ -35,7 +35,7 @@ data class RenderVerdict(val problems: List<String>) {
          * starts with a reflexive "Yes" and then reports no problem at all.
          */
         private val REASSURANCE = Regex(
-            """\b(nothing|no (issues?|problems?)|not (broken|messy)|looks? (fine|good|correct|clean|great)|all (the )?(text|content|elements?) (is|are) (visible|readable))\b""",
+            """\b(nothing|no (issues?|problems?|overlaps?)|not (broken|messy)|looks? (fine|good|correct|clean|great)|(clean|tidy|neat) (layout|design|screen)|is (clean|fine|correct)|all (the )?(text|content|elements?) (is|are) (visible|readable))\b""",
             RegexOption.IGNORE_CASE,
         )
 
