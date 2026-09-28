@@ -54,6 +54,8 @@ class AgentLoop(
     private val tools: AgentTools,
     private val maxIterations: Int = 8,
     private val maxNewTokensPerTurn: Int = 2048,
+    /** Reasoning comes out of the same budget as the page, and a page alone is ~1.5k tokens. */
+    private val maxNewTokensThinking: Int = 8192,
 ) {
 
     /**
@@ -61,13 +63,18 @@ class AgentLoop(
      * @param imageTag an MNN `<img>` reference for a photo the page should be built from, for a
      *   coder that can see images.
      * @param sketchDescription the vision sidecar's reading of that photo, for one that cannot.
+     * @param thinking whether the model was loaded with thinking on. Qwen3.5's template then
+     *   opens `<think>` itself, so each reply starts mid-reasoning and only `</think>` marks
+     *   where the answer begins.
      */
     fun run(
         userMessage: String,
         currentPage: String? = null,
         imageTag: String? = null,
         sketchDescription: String? = null,
+        thinking: Boolean = false,
     ): Flow<AgentUpdate> = flow {
+        val maxNewTokens = if (thinking) maxNewTokensThinking else maxNewTokensPerTurn
         val parser = ToolCallParser()
         val firstTurn = HermesPrompt.userTurn(userMessage, currentPage, imageTag, sketchDescription)
         val conversation = mutableListOf(
@@ -87,14 +94,31 @@ class AgentLoop(
             val rawAssistant = StringBuilder()
 
             var streamed = 0
-            engine.generateChat(conversation, maxNewTokensPerTurn).collect { chunk ->
-                rawAssistant.append(chunk)
+            // Reasoning is held back from the parser: it often quotes a <site> or a tool call
+            // it is planning, and parsing that would act on the plan instead of the answer.
+            var reasoning = if (thinking) StringBuilder() else null
+            if (reasoning != null) emit(AgentUpdate.ToolStarted(THINK_STEP, "Thinking"))
+            engine.generateChat(conversation, maxNewTokens).collect { chunk ->
                 streamed += chunk.length
                 emit(AgentUpdate.Progress(streamed))
-                for (event in parser.feed(chunk)) {
+                var answer = chunk
+                reasoning?.let { thought ->
+                    thought.append(chunk)
+                    val end = thought.indexOf(THINK_END)
+                    if (end < 0) return@collect
+                    answer = thought.substring(end + THINK_END.length).trimStart()
+                    emit(AgentUpdate.ToolFinished(THINK_STEP, true, thought.substring(0, end).trim().takeLast(400)))
+                    reasoning = null
+                }
+                rawAssistant.append(answer)
+                for (event in parser.feed(answer)) {
                     if (event is AgentEvent.Malformed) sawMalformed = true
                     emitEvent(event, pending)
                 }
+            }
+            reasoning?.let {
+                // The budget ran out mid-thought; the retry below asks again.
+                emit(AgentUpdate.ToolFinished(THINK_STEP, false, "ran out of tokens while thinking"))
             }
             for (event in parser.finish()) {
                 if (event is AgentEvent.Malformed) sawMalformed = true
@@ -218,5 +242,7 @@ class AgentLoop(
         const val TAG = "AgentLoop"
         val PREVIEW_URL = Regex("""http://localhost:\d+""")
         const val SITE_ARTIFACT = "<site> artifact"
+        const val THINK_STEP = "think"
+        const val THINK_END = "</think>"
     }
 }

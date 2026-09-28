@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
                         onStop = viewModel::stopGeneration,
                         onMic = { withMicrophone(viewModel::startDictation) },
                         onToggleHandsFree = viewModel::toggleHandsFree,
+                        onToggleThinking = viewModel::toggleThinking,
                         onCamera = ::capturePhoto,
                         onPickImage = {
                             pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))

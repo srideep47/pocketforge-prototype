@@ -88,6 +88,7 @@ class StudioActions(
     val onCancelDownload: (String) -> Unit,
     val onDeleteModel: (String) -> Unit,
     val onRefreshModels: () -> Unit,
+    val onToggleThinking: () -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -221,6 +222,7 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                             onCamera = actions.onCamera,
                             onPickImage = actions.onPickImage,
                             onClearImage = actions.onClearImage,
+                            onToggleThinking = actions.onToggleThinking,
                         ),
                         onOpenPreview = {
                             if (!state.devServerRunning) {

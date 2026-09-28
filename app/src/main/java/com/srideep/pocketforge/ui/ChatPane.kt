@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
@@ -97,6 +98,7 @@ class ComposerActions(
     val onCamera: () -> Unit,
     val onPickImage: () -> Unit,
     val onClearImage: () -> Unit,
+    val onToggleThinking: () -> Unit = {},
 )
 
 private val CHARS_REGEX = Regex("""(\d+)\s*chars""")
@@ -626,6 +628,12 @@ private fun stepPresentation(trace: ToolTrace): Triple<ImageVector, String, Stri
             "VISION",
         )
 
+        "think" -> Triple(
+            Icons.Default.Psychology,
+            if (trace.ok == null) "Thinking it through" else "Planned the page",
+            "REASONING",
+        )
+
         "check_render" -> {
             val isFixing = trace.summary.startsWith("fixing:", ignoreCase = true)
             if (isFixing) {
@@ -1024,6 +1032,44 @@ private fun EmptyChat(
     }
 }
 
+/**
+ * Whether the coder reasons before writing. Switching reloads the model (a few seconds), so it
+ * is locked while a run or a load is in progress.
+ */
+@Composable
+private fun ThinkingPill(
+    on: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val accent = if (on) CodeColors.visionAccent else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .border(1.dp, accent.copy(alpha = if (enabled) 0.6f else 0.25f), RoundedCornerShape(50))
+            .background(if (on) accent.copy(alpha = 0.12f) else Color.Transparent)
+            .clickable(enabled = enabled, onClickLabel = "Toggle thinking", onClick = onToggle)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Icon(
+            Icons.Default.Psychology,
+            contentDescription = null,
+            modifier = Modifier.size(15.dp),
+            tint = accent.copy(alpha = if (enabled) 1f else 0.5f),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = if (on) "Thinking on" else "Thinking off",
+            fontFamily = CodeColors.mono,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color = accent.copy(alpha = if (enabled) 1f else 0.5f),
+        )
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Composer(
@@ -1085,6 +1131,12 @@ private fun Composer(
                     }
                 }
             }
+            ThinkingPill(
+                on = state.thinking,
+                enabled = !state.isGenerating && state.modelStatus != ModelStatus.LOADING,
+                onToggle = actions.onToggleThinking,
+                modifier = Modifier.padding(start = 12.dp, top = 8.dp),
+            )
             if (state.handsFree) {
                 Text(
                     text = if (state.isListening) {

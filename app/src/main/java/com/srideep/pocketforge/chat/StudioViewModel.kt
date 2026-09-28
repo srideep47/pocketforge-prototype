@@ -86,6 +86,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val downloadJobs = mutableMapOf<String, Job>()
     private var loadedModelId: String? = null
 
+    /** What the loaded model's chat template was set up with; the toggle alone may be ahead of it. */
+    private var loadedWithThinking = false
+
     /** Where a model directory is expected: /Android/data/&lt;pkg&gt;/files/models/&lt;name&gt;. */
     private val modelsDir: File =
         File(application.getExternalFilesDir(null) ?: application.filesDir, "models")
@@ -208,6 +211,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun loadModel(id: String) {
         val model = CatalogModel.byId(id) ?: return
+        val thinking = _state.value.thinking
         viewModelScope.launch {
             _state.value = _state.value.copy(
                 modelStatus = ModelStatus.LOADING,
@@ -226,6 +230,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                         prefillChunk = model.prefillChunk,
                         maxAllTokens = model.contextTokens,
                         kvcacheMmap = model.kvCacheOnStorage,
+                        enableThinking = thinking,
                     ),
                 )
             }.getOrElse { error ->
@@ -233,6 +238,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 false
             }
             loadedModelId = if (loaded) model.id else null
+            loadedWithThinking = loaded && thinking
             if (loaded) {
                 KeepAliveService.start(getApplication(), model.displayName + " loaded")
             } else {
@@ -241,7 +247,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             _state.value = _state.value.copy(
                 modelStatus = if (loaded) ModelStatus.READY else ModelStatus.FAILED,
                 status = if (loaded) {
-                    model.displayName + " ready · " + model.contextTokens / 1000 + "k context"
+                    model.displayName + " ready · " + model.contextTokens / 1000 + "k context" +
+                        if (thinking) " · thinking" else ""
                 } else {
                     "Could not load " + model.displayName
                 },
@@ -305,7 +312,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     imageTag = null
                 }
                 val pageBefore = currentIndex()
-                val wrote = runAgent(assistantId, agent.run(prompt, currentPage, imageTag, sketch))
+                val wrote = runAgent(
+                    assistantId,
+                    agent.run(prompt, currentPage, imageTag, sketch, thinking = loadedWithThinking),
+                )
                 if (wrote && currentIndex() != pageBefore) checkRender(assistantId)
             } catch (e: Exception) {
                 Log.e(TAG, "agent run failed", e)
@@ -414,7 +424,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         val page = pageToEdit() ?: return
         _state.value = _state.value.copy(status = "Fixing what the check found…")
         updateMessage(assistantId) { if (it.text.isBlank()) it else it.copy(text = it.text + "\n\n") }
-        runAgent(assistantId, agent.run(verdict.fixRequest(), page))
+        runAgent(assistantId, agent.run(verdict.fixRequest(), page, thinking = loadedWithThinking))
     }
 
     private suspend fun loadSidecar(vision: CatalogModel) {
@@ -765,6 +775,22 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 _state.value = _state.value.copy(isListening = false)
             }
         })
+    }
+
+    /**
+     * Thinking is part of the chat template MNN sets up at load, so a loaded model is reloaded
+     * to pick it up. The weights stay in the page cache, which makes that a few seconds.
+     */
+    fun toggleThinking() {
+        if (_state.value.isGenerating) return
+        val on = !_state.value.thinking
+        _state.value = _state.value.copy(thinking = on)
+        val loaded = loadedModelId
+        if (loaded != null && _state.value.modelStatus == ModelStatus.READY) {
+            loadModel(loaded)
+        } else {
+            _state.value = _state.value.copy(status = if (on) "Thinking on" else "Thinking off")
+        }
     }
 
     fun toggleHandsFree() {

@@ -64,6 +64,9 @@ enum class CatalogModel(
         approxBytes = 2_833_000_000L,
         extraFiles = listOf("visual.mnn", "visual.mnn.weight"),
         seesImages = true,
+        // Thinking takes up to 8k tokens before the page itself. Only 1 layer in 4 keeps a KV
+        // cache in this hybrid architecture, so the larger budget costs well under 1 GB.
+        contextTokens = 16_384,
     ),
     QWEN_2B(
         id = "Qwen3.5-2B",
