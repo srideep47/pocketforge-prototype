@@ -54,22 +54,16 @@ enum class CatalogModel(
      */
     val kvCacheOnStorage: Boolean = false,
 ) {
-    LING_3_TINY(
-        id = "Ling-3.0-tiny",
-        displayName = "Ling 3.0 Tiny",
-        shortName = "Ling",
-        subtitle = "7.9B MoE, 1.3B active. Twice the reasoning of Qwen 2B at similar speed.",
-        repo = null,
-        tokenizerFile = "tokenizer.mtok",
-        approxBytes = 5_401_000_000L,
-        extraFiles = listOf("embeddings_bf16.bin"),
-        threadNum = 4,
-        // Loaded, this model plus the app runs at ~5.5 GB, and one-pass prefill of a 700-token
-        // prompt then failed an allocation on device. Blocks of 128 cut the prefill peak by
-        // ~400 MB, and an 8k budget shrinks the six MLA layers' KV cache.
-        prefillChunk = 128,
-        contextTokens = 8_192,
-        kvCacheOnStorage = true,
+    QWEN_4B(
+        id = "Qwen3.5-4B",
+        displayName = "Qwen 3.5 · 4B",
+        shortName = "4B",
+        subtitle = "Recommended. Better code, fewer malformed tool calls. Needs ~3 GB free.",
+        repo = "taobao-mnn/Qwen3.5-4B-MNN",
+        tokenizerFile = "tokenizer.txt",
+        approxBytes = 2_833_000_000L,
+        extraFiles = listOf("visual.mnn", "visual.mnn.weight"),
+        seesImages = true,
     ),
     QWEN_2B(
         id = "Qwen3.5-2B",
@@ -79,17 +73,6 @@ enum class CatalogModel(
         repo = "taobao-mnn/Qwen3.5-2B-MNN",
         tokenizerFile = "tokenizer.txt",
         approxBytes = 1_385_000_000L,
-        extraFiles = listOf("visual.mnn", "visual.mnn.weight"),
-        seesImages = true,
-    ),
-    QWEN_4B(
-        id = "Qwen3.5-4B",
-        displayName = "Qwen 3.5 · 4B",
-        shortName = "4B",
-        subtitle = "Better code, fewer malformed tool calls. Needs ~3 GB free.",
-        repo = "taobao-mnn/Qwen3.5-4B-MNN",
-        tokenizerFile = "tokenizer.txt",
-        approxBytes = 2_833_000_000L,
         extraFiles = listOf("visual.mnn", "visual.mnn.weight"),
         seesImages = true,
     ),
