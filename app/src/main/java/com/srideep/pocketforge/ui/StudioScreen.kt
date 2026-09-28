@@ -1,6 +1,7 @@
 package com.srideep.pocketforge.ui
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,11 +9,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -94,6 +98,9 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
     var tab by remember { mutableIntStateOf(0) }
     var modelSheetOpen by remember { mutableStateOf(false) }
 
+    val fileCount = remember(state.files) { state.files.count { !it.isDirectory } }
+    val isOffline = state.metrics?.let { it.offline || it.airplaneMode } ?: true
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -122,31 +129,54 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                Column {
+                Column(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
                     TopAppBar(
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.background,
                         ),
                         title = {
                             Column {
-                                Text(
-                                    text = "PocketForge",
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                                AnimatedVisibility(visible = state.status.isNotBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                ) {
                                     Text(
-                                        text = state.status,
+                                        text = "PocketForge",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                    )
+                                    Text(
+                                        text = if (isOffline) "OFFLINE" else "LOCAL",
                                         fontFamily = CodeColors.mono,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f))
+                                            .border(
+                                                1.dp,
+                                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f),
+                                                RoundedCornerShape(4.dp),
+                                            )
+                                            .padding(horizontal = 5.dp, vertical = 1.5.dp),
                                     )
                                 }
+                                Text(
+                                    text = state.status.ifBlank { "On-device AI studio · local MNN" },
+                                    style = CodeColors.tabularMonoStyle,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                         },
                         navigationIcon = {
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            IconButton(
+                                onClick = { scope.launch { drawerState.open() } },
+                                modifier = Modifier.size(48.dp),
+                            ) {
                                 Icon(
                                     Icons.Default.FolderOpen,
                                     contentDescription = "Project files",
@@ -165,7 +195,12 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                             )
                         },
                     )
-                    SegmentedTabs(selected = tab, onSelect = { tab = it })
+                    SegmentedTabs(
+                        selected = tab,
+                        fileCount = fileCount,
+                        previewLive = state.devServerRunning && state.previewUrl != null,
+                        onSelect = { tab = it },
+                    )
                 }
             },
         ) { padding ->
@@ -187,6 +222,20 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                             onPickImage = actions.onPickImage,
                             onClearImage = actions.onClearImage,
                         ),
+                        onOpenPreview = {
+                            if (!state.devServerRunning) {
+                                actions.onStartServer()
+                            }
+                            tab = StudioTab.PREVIEW.ordinal
+                        },
+                        onOpenCode = { path ->
+                            actions.onOpenFile(path)
+                            tab = StudioTab.CODE.ordinal
+                        },
+                        onOpenModelSheet = {
+                            actions.onRefreshModels()
+                            modelSheetOpen = true
+                        },
                         modifier = Modifier.weight(1f),
                     )
 
@@ -194,6 +243,9 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                         openFile = state.openFile,
                         onContentChange = actions.onEditorChange,
                         onSave = actions.onSaveFile,
+                        files = state.files,
+                        onSelectFile = actions.onOpenFile,
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
                         modifier = Modifier.weight(1f),
                     )
 
@@ -225,8 +277,8 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
 }
 
 /**
- * The model state lives in the top bar as a chip rather than an icon: which model is
- * loaded is the single most load-bearing fact on screen, and an icon cannot say it.
+ * Model status chip in the top app bar.
+ * Preserves the exact label "No model" when unloaded for automated phone testing.
  */
 @Composable
 private fun ModelChip(name: String?, status: ModelStatus, onClick: () -> Unit) {
@@ -246,11 +298,13 @@ private fun ModelChip(name: String?, status: ModelStatus, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .padding(end = 12.dp)
+            .padding(end = 10.dp)
+            .heightIn(min = 38.dp)
             .clip(RoundedCornerShape(100))
+            .background(MaterialTheme.colorScheme.surface)
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(100))
             .clickable(onClick = onClick)
-            .padding(start = 10.dp, end = 12.dp, top = 7.dp, bottom = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 7.dp),
     ) {
         Box(
             modifier = Modifier
@@ -258,38 +312,55 @@ private fun ModelChip(name: String?, status: ModelStatus, onClick: () -> Unit) {
                 .clip(CircleShape)
                 .background(dotColor),
         )
+        Spacer(modifier = Modifier.width(7.dp))
         Text(
-            text = "  $label",
+            text = label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
         )
     }
 }
 
-/** A pill segmented control; Material's TabRow indicator reads as a browser, not a tool. */
+/** Pill segmented tab bar with fast 150ms transitions and live Code/Preview indicators. */
 @Composable
-private fun SegmentedTabs(selected: Int, onSelect: (Int) -> Unit) {
+private fun SegmentedTabs(
+    selected: Int,
+    fileCount: Int,
+    previewLive: Boolean,
+    onSelect: (Int) -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .padding(bottom = 10.dp)
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 8.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         StudioTab.entries.forEachIndexed { index, entry ->
             val active = index == selected
+            val tabBg by animateColorAsState(
+                targetValue = if (active) {
+                    MaterialTheme.colorScheme.surfaceContainerHighest
+                } else {
+                    Color.Transparent
+                },
+                animationSpec = tween(durationMillis = 160),
+                label = "tabBg",
+            )
+
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (active) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
-                    )
+                    .heightIn(min = 38.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(tabBg)
                     .clickable { onSelect(index) }
-                    .padding(vertical = 9.dp),
+                    .padding(vertical = 8.dp, horizontal = 6.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -307,8 +378,9 @@ private fun SegmentedTabs(selected: Int, onSelect: (Int) -> Unit) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "  " + entry.label,
+                    text = entry.label,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (active) {
@@ -317,6 +389,35 @@ private fun SegmentedTabs(selected: Int, onSelect: (Int) -> Unit) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+
+                if (entry == StudioTab.CODE && fileCount > 0) {
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = fileCount.toString(),
+                        style = CodeColors.tabularMonoStyle,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (active) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
+                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                    )
+                }
+
+                if (entry == StudioTab.PREVIEW && previewLive) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.secondary),
+                    )
+                }
             }
         }
     }
