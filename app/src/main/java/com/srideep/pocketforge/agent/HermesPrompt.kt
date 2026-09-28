@@ -142,6 +142,13 @@ object SiteArtifact {
     )
     private val HEAD_END = Regex("</head\\s*>", RegexOption.IGNORE_CASE)
 
+    /** A `<site>` was opened and the reply stopped before the document ended. */
+    fun isCutOff(raw: CharSequence): Boolean {
+        val open = OPEN.find(raw) ?: return false
+        val start = open.range.last + 1
+        return CLOSE.find(raw, start) == null && !raw.substring(start).contains("</html>", ignoreCase = true)
+    }
+
     fun extract(raw: String): String? {
         val open = OPEN.find(raw)
         if (open != null) {

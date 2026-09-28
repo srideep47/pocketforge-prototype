@@ -102,8 +102,8 @@ data class StudioUiState(
     val isListening: Boolean = false,
     /** Dictation sends as soon as speech ends, so a change can be spoken without touching. */
     val handsFree: Boolean = false,
-    /** The coder reasons before it answers: slower, but better pages. Changing it reloads the model. */
-    val thinking: Boolean = true,
+    /** The coder reasons before it answers. Off by default; changing it reloads the model. */
+    val thinking: Boolean = false,
     val metrics: RunMetrics? = null,
     val modelStatus: ModelStatus = ModelStatus.MISSING,
     val modelName: String? = null,

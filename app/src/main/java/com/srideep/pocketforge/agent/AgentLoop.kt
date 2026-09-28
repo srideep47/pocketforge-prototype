@@ -53,7 +53,8 @@ class AgentLoop(
     private val engine: MnnLlmEngine,
     private val tools: AgentTools,
     private val maxIterations: Int = 8,
-    private val maxNewTokensPerTurn: Int = 2048,
+    /** A full page is 1.5-2.5k tokens; at 2048 a calculator page was cut off on every turn. */
+    private val maxNewTokensPerTurn: Int = 4096,
     /** Reasoning comes out of the same budget as the page, and a page alone is ~1.5k tokens. */
     private val maxNewTokensThinking: Int = 8192,
     /** Reasoning past this (~1k tokens, two minutes on the phone) is cut off; see run(). */
@@ -100,6 +101,9 @@ class AgentLoop(
             // it is planning, and parsing that would act on the plan instead of the answer.
             var reasoning = if (thinking) StringBuilder() else null
             var overBudget = false
+            // What follows the template's assistant header before the answer: the closed
+            // thought in thinking mode, nothing otherwise (the template closes an empty one).
+            var thoughtPrefix = ""
             if (reasoning != null) emit(AgentUpdate.ToolStarted(THINK_STEP, "Thinking"))
 
             suspend fun take(chunk: String) {
@@ -118,6 +122,7 @@ class AgentLoop(
                         return
                     }
                     answer = thought.substring(end + THINK_END.length).trimStart()
+                    thoughtPrefix = thought.substring(0, end) + THINK_END + "\n\n"
                     emit(AgentUpdate.ToolFinished(THINK_STEP, true, thought.substring(0, end).trim().takeLast(400)))
                     reasoning = null
                 }
@@ -140,7 +145,18 @@ class AgentLoop(
                 emit(AgentUpdate.ToolFinished(THINK_STEP, true, plan.takeLast(400)))
                 reasoning = null
                 val prefix = plan + "\n\n" + THINK_WRAP_UP + "\n" + THINK_END + "\n\n"
-                engine.continueChat(conversation, prefix, maxNewTokensPerTurn * 2).collect { take(it) }
+                thoughtPrefix = prefix
+                engine.continueChat(conversation, prefix, maxNewTokensPerTurn).collect { take(it) }
+            }
+            // A page longer than the budget stops mid-document. Asking again regenerates it from
+            // the top and stops in the same place (three turns of that, 16 minutes, no page, on
+            // device), so the reply is continued from where it was cut instead.
+            var continuations = 0
+            while (reasoning == null && continuations < MAX_CONTINUATIONS && SiteArtifact.isCutOff(rawAssistant)) {
+                continuations++
+                emit(AgentUpdate.TurnStats(engine.lastStats()))
+                Log.i(TAG, "turn $iteration: page cut off at ${rawAssistant.length} chars, continuing")
+                engine.continueChat(conversation, thoughtPrefix + rawAssistant, maxNewTokensPerTurn).collect { take(it) }
             }
             reasoning?.let {
                 // The budget ran out mid-thought; the retry below asks again.
@@ -167,6 +183,11 @@ class AgentLoop(
                     sawMalformed = false
                 }
             }
+            Log.i(
+                TAG,
+                "turn $iteration: ${streamed} chars streamed, answer ${rawAssistant.length} chars, " +
+                    "calls=${pending.size} malformed=$sawMalformed overBudget=$overBudget",
+            )
             conversation += ChatTurn("assistant", rawAssistant.toString())
 
             if (pending.isEmpty()) {
@@ -271,6 +292,7 @@ class AgentLoop(
         private val PREVIEW_URL = Regex("""http://localhost:\d+""")
         private const val SITE_ARTIFACT = "<site> artifact"
         private const val THINK_END = "</think>"
+        private const val MAX_CONTINUATIONS = 2
 
         /** Closes a cut-off thought in the model's own voice, so the answer follows naturally. */
         private const val THINK_WRAP_UP = "That is enough planning. I will write the complete page now."
