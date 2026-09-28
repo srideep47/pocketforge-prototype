@@ -70,4 +70,13 @@ class RenderVerdictTest {
         assertEquals(true, RenderVerdict.leadingYesNo("<think>hmm</think>\nYES: text is tiny").first)
         assertEquals("text is tiny", RenderVerdict.leadingYesNo("YES: text is tiny").second)
     }
+
+    @Test
+    fun `script errors turn a clean verdict into a fix`() {
+        val clean = RenderVerdict.parse("No, nothing overlaps.", "No, it looks clean.")
+        assertEquals(false, clean.hasProblems)
+        assertEquals(clean, clean.withScriptErrors(emptyList()))
+        val broken = clean.withScriptErrors(listOf("Uncaught ReferenceError: total is not defined (line 42)"))
+        assertEquals(listOf("the script fails: Uncaught ReferenceError: total is not defined (line 42)"), broken.problems)
+    }
 }

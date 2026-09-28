@@ -410,9 +410,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         _state.value = _state.value.copy(status = "Checking the page…")
         runPhase = RunPhase.CHECKING
         var shotPath: String? = null
+        var scriptErrors = emptyList<String>()
         val check = try {
-            val shot = PageSnapshot.capture(getApplication(), url, attachmentsDir)
-                ?: error("could not render the page")
+            val render = PageSnapshot.capture(getApplication(), url, attachmentsDir)
+            scriptErrors = render.scriptErrors
+            val shot = render.image ?: error("could not render the page")
             shotPath = shot.file.absolutePath
             loadSidecar(vision)
             sidecar.inspect(shot.mnnTag)
@@ -427,7 +429,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         runVisionMicros += check.visionMicros
         publishMetrics(running = true)
         Log.i(TAG, "render checked in " + check.elapsedMs + " ms:\n" + check.answers)
-        val verdict = check.verdict
+        if (scriptErrors.isNotEmpty()) Log.i(TAG, "script errors: $scriptErrors")
+        // A script error is a certain bug, unlike the critic's opinions, so it always gets fixed.
+        val verdict = check.verdict.withScriptErrors(scriptErrors)
         finishTool(
             assistantId,
             "check_render",

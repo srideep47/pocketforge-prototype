@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.util.Log
 import android.view.View
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -31,6 +33,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 object PageSnapshot {
 
+    /**
+     * A rendered page: its screenshot (null if nothing drew) and the script errors it logged.
+     * A page can look perfect and still throw on load; the screenshot alone would pass it.
+     */
+    class Render(val image: PreparedImage?, val scriptErrors: List<String>)
+
     /** CSS viewport of a common phone, so the page takes the layout users will actually see. */
     private const val VIEWPORT_WIDTH_DP = 412
     private const val VIEWPORT_HEIGHT_DP = 915
@@ -49,17 +57,20 @@ object PageSnapshot {
 
     private const val FILE_PREFIX = "render_"
     private const val KEEP_RENDERS = 10
+    private const val MAX_ERRORS = 3
     private const val TAG = "PageSnapshot"
 
-    /** Returns the screenshot as a JPEG in [outDir], or null if the page did not render. */
-    suspend fun capture(context: Context, url: String, outDir: File): PreparedImage? {
-        val bitmap = withContext(Dispatchers.Main) { render(context, url) } ?: return null
-        return withContext(Dispatchers.IO) { save(bitmap, outDir) }
+    /** Renders [url]; the screenshot is saved as a JPEG in [outDir]. */
+    suspend fun capture(context: Context, url: String, outDir: File): Render {
+        val errors = mutableListOf<String>()
+        val bitmap = withContext(Dispatchers.Main) { render(context, url, errors) }
+        val image = bitmap?.let { withContext(Dispatchers.IO) { save(it, outDir) } }
+        return Render(image, errors.distinct().take(MAX_ERRORS))
     }
 
     /** WebViews may only be touched on the main thread. */
     @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun render(context: Context, url: String): Bitmap? {
+    private suspend fun render(context: Context, url: String, errors: MutableList<String>): Bitmap? {
         val density = context.resources.displayMetrics.density
         val width = (VIEWPORT_WIDTH_DP * density).roundToInt()
         val height = (VIEWPORT_HEIGHT_DP * density).roundToInt()
@@ -77,6 +88,15 @@ object PageSnapshot {
                 View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
             )
             webView.layout(0, 0, width, height)
+            webView.webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                    // Uncaught exceptions arrive here too, as "Uncaught TypeError: ...".
+                    if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                        errors += message.message().take(160) + " (line " + message.lineNumber() + ")"
+                    }
+                    return true
+                }
+            }
 
             val loaded = withTimeoutOrNull(LOAD_TIMEOUT_MS) {
                 suspendCancellableCoroutine { continuation ->

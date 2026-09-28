@@ -36,6 +36,12 @@ object HermesPrompt {
         Use only valid CSS values. Every CSS custom property you reference must be declared;
         for a simple page, prefer direct values over custom properties.
 
+        Interactions must really work, not just look right. The values your script compares
+        against must be exactly the ones your controls send: a key labelled × or ÷ either sends
+        "*" and "/" or the script handles "×" and "÷". Whatever the user is typing or has
+        produced must be visible on screen at every step. Before writing, trace one real use
+        through your code; for a calculator, 7 × 8 = must show 7, then 7×8, then 56.
+
         When the user gives no style, make it look like a finished product, not a template:
         the system-ui font stack, a centred column no wider than 960px with 20px side padding,
         one accent colour with a darker hover shade, spacing in multiples of 8px, 12px corner

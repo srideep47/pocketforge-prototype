@@ -14,6 +14,10 @@ data class RenderVerdict(val problems: List<String>) {
     /** One line for the chat. */
     fun summary(): String = if (hasProblems) problems.joinToString("; ") else "no problems seen"
 
+    /** This verdict plus errors the page's script logged while loading. */
+    fun withScriptErrors(errors: List<String>): RenderVerdict =
+        if (errors.isEmpty()) this else RenderVerdict(problems + errors.map { "the script fails: $it" })
+
     /** The change request for the one automatic fix round. */
     fun fixRequest(): String =
         "Fix these problems seen in a screenshot of the page: " + problems.joinToString("; ") + "."
