@@ -47,6 +47,12 @@ enum class CatalogModel(
     val prefillChunk: Int = 0,
     /** Prompt plus reply budget; smaller means a smaller attention cache. */
     val contextTokens: Int = ModelConfig.DEFAULT_CONTEXT_TOKENS,
+    /**
+     * Keep the KV cache in a file instead of RAM. The weights are already memory-mapped from
+     * storage; this moves the other large allocation there too, so under memory pressure the
+     * kernel can page it out instead of the low-memory killer taking the whole app.
+     */
+    val kvCacheOnStorage: Boolean = false,
 ) {
     LING_3_TINY(
         id = "Ling-3.0-tiny",
@@ -63,6 +69,7 @@ enum class CatalogModel(
         // ~400 MB, and an 8k budget shrinks the six MLA layers' KV cache.
         prefillChunk = 128,
         contextTokens = 8_192,
+        kvCacheOnStorage = true,
     ),
     QWEN_2B(
         id = "Qwen3.5-2B",

@@ -225,6 +225,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                         threadNum = model.threadNum,
                         prefillChunk = model.prefillChunk,
                         maxAllTokens = model.contextTokens,
+                        kvcacheMmap = model.kvCacheOnStorage,
                     ),
                 )
             }.getOrElse { error ->

@@ -10,7 +10,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalView
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,6 +67,13 @@ class MainActivity : ComponentActivity() {
                 val viewModel: StudioViewModel = viewModel()
                 viewModelRef = viewModel
                 val state by viewModel.state.collectAsStateWithLifecycle()
+                // A run takes minutes on a phone; the screen locking mid-run hides the result,
+                // and in a demo it looks like the app stalled.
+                val view = LocalView.current
+                DisposableEffect(state.isGenerating) {
+                    view.keepScreenOn = state.isGenerating
+                    onDispose { view.keepScreenOn = false }
+                }
 
                 StudioScreen(
                     state = state,

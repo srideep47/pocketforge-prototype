@@ -112,7 +112,7 @@ class AgentLoop(
                         arguments = org.json.JSONObject()
                             .put("path", "index.html")
                             .put("content", html),
-                        raw = "<site> artifact",
+                        raw = SITE_ARTIFACT,
                     )
                     sawMalformed = false
                 }
@@ -169,6 +169,19 @@ class AgentLoop(
                 }
             }
 
+            // A complete page arrived as a <site> artifact and was saved: that is the whole task.
+            // Asking the model to acknowledge it re-feeds the entire page as a new prompt, which
+            // on Ling cost a minute of prefill and ~3.5 GB of memory, enough for the low-memory
+            // killer to take the app, all to produce "Done."
+            if (results.all { (call, result) -> call.raw == SITE_ARTIFACT && result.ok } && siteChanged) {
+                emit(AgentUpdate.Token("Built index.html."))
+                tools.ensurePreview()?.let { result ->
+                    PREVIEW_URL.find(result.content)?.value?.let { emit(AgentUpdate.PreviewReady(it)) }
+                }
+                emit(AgentUpdate.Done)
+                return@flow
+            }
+
             conversation += ChatTurn("user", HermesPrompt.toolResponses(results))
             tools.ensurePreview()?.let { result ->
                 PREVIEW_URL.find(result.content)?.value?.let { emit(AgentUpdate.PreviewReady(it)) }
@@ -204,5 +217,6 @@ class AgentLoop(
     private companion object {
         const val TAG = "AgentLoop"
         val PREVIEW_URL = Regex("""http://localhost:\d+""")
+        const val SITE_ARTIFACT = "<site> artifact"
     }
 }
