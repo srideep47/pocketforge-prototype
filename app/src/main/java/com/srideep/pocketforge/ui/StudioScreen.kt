@@ -100,7 +100,7 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
     var modelSheetOpen by remember { mutableStateOf(false) }
 
     val fileCount = remember(state.files) { state.files.count { !it.isDirectory } }
-    val isOffline = state.metrics?.let { it.offline || it.airplaneMode } ?: true
+    val isOffline = state.metrics?.let { it.offline || it.airplaneMode } ?: false
 
     ModalNavigationDrawer(
         drawerState = drawerState,

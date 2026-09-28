@@ -89,6 +89,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     /** What the loaded model's chat template was set up with; the toggle alone may be ahead of it. */
     private var loadedWithThinking = false
 
+    private var runPhase = RunPhase.IDLE
+
+    /** A think step is open: output streaming now is reasoning, not the page. */
+    private var thinkingOpen = false
+
     /** Where a model directory is expected: /Android/data/&lt;pkg&gt;/files/models/&lt;name&gt;. */
     private val modelsDir: File =
         File(application.getExternalFilesDir(null) ?: application.filesDir, "models")
@@ -301,6 +306,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         runPrefillMicros = 0L
         runVisionMicros = 0L
         lastVisionMicros = engine.lastStats().visionMicros
+        runPhase = RunPhase.PREFILL
+        thinkingOpen = false
         startMetrics()
 
         agentJob = viewModelScope.launch {
@@ -322,8 +329,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 updateMessage(assistantId) { it.copy(text = it.text + "\n\n" + e.message) }
             } finally {
                 // trimEnd: a fix round that ends silently leaves the separator it was given.
-                updateMessage(assistantId) { it.copy(text = it.text.trimEnd(), streaming = false) }
-                finishMetrics()
+                val final = finishMetrics()
+                updateMessage(assistantId) { it.copy(text = it.text.trimEnd(), streaming = false, metrics = final) }
                 _state.value = _state.value.copy(
                     isGenerating = false,
                     status = throughputSummary(),
@@ -348,7 +355,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             }
             return null
         }
-        updateMessage(assistantId) { it.copy(tools = it.tools + ToolTrace("read_sketch", vision.shortName + " vision")) }
+        updateMessage(assistantId) { it.copy(tools = it.tools + ToolTrace("read_sketch", vision.shortName + " vision", startedAt = SystemClock.elapsedRealtime())) }
         _state.value = _state.value.copy(status = "Reading the sketch…")
         val result = runCatching {
             loadSidecar(vision)
@@ -393,11 +400,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         val vision = CatalogModel.vision
         if (!vision.isInstalledIn(modelsDir)) return
         val url = _state.value.previewUrl ?: return
-        updateMessage(assistantId) { it.copy(tools = it.tools + ToolTrace("check_render", vision.shortName + " vision")) }
+        updateMessage(assistantId) { it.copy(tools = it.tools + ToolTrace("check_render", vision.shortName + " vision", startedAt = SystemClock.elapsedRealtime())) }
         _state.value = _state.value.copy(status = "Checking the page…")
+        runPhase = RunPhase.CHECKING
+        var shotPath: String? = null
         val check = try {
             val shot = PageSnapshot.capture(getApplication(), url, attachmentsDir)
                 ?: error("could not render the page")
+            shotPath = shot.file.absolutePath
             loadSidecar(vision)
             sidecar.inspect(shot.mnnTag)
         } catch (e: CancellationException) {
@@ -405,7 +415,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         } catch (e: Exception) {
             // The page is already written; a check that cannot run just ends the run as before.
             Log.w(TAG, "render check failed", e)
-            finishTool(assistantId, "check_render", ok = false, detail = e.message ?: "failed")
+            finishTool(assistantId, "check_render", ok = false, detail = e.message ?: "failed", imagePath = shotPath)
             return
         }
         runVisionMicros += check.visionMicros
@@ -418,8 +428,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             ok = true,
             detail = verdict.summary(),
             summary = if (verdict.hasProblems) "fixing: " + verdict.summary() else "looks right",
+            imagePath = shotPath,
         )
         if (!verdict.hasProblems) return
+        runPhase = RunPhase.PREFILL
 
         val page = pageToEdit() ?: return
         _state.value = _state.value.copy(status = "Fixing what the check found…")
@@ -442,11 +454,19 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         ok: Boolean,
         detail: String,
         summary: String? = null,
+        imagePath: String? = null,
     ) = updateMessage(assistantId) { message ->
         val index = message.tools.indexOfLast { it.name == name && it.ok == null }
         if (index < 0) return@updateMessage message
         val updated = message.tools.toMutableList()
-        updated[index] = updated[index].copy(ok = ok, detail = detail, summary = summary ?: updated[index].summary)
+        val step = updated[index]
+        updated[index] = step.copy(
+            ok = ok,
+            detail = detail,
+            summary = summary ?: step.summary,
+            elapsedMs = step.startedAt.takeIf { it > 0L }?.let { SystemClock.elapsedRealtime() - it },
+            imagePath = imagePath ?: step.imagePath,
+        )
         message.copy(tools = updated)
     }
 
@@ -467,16 +487,25 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         when (update) {
             is AgentUpdate.Token -> updateMessage(assistantId) { it.copy(text = it.text + update.text) }
 
-            is AgentUpdate.ToolStarted -> updateMessage(assistantId) {
-                it.copy(tools = it.tools + ToolTrace(update.name, update.summary))
+            is AgentUpdate.ToolStarted -> {
+                if (update.name == AgentLoop.THINK_STEP) {
+                    // Opened before generation starts; prefill stays the phase until output flows.
+                    thinkingOpen = true
+                    if (runPhase != RunPhase.PREFILL) runPhase = RunPhase.THINKING
+                } else {
+                    runPhase = RunPhase.TOOLS
+                }
+                updateMessage(assistantId) {
+                    it.copy(tools = it.tools + ToolTrace(update.name, update.summary, startedAt = SystemClock.elapsedRealtime()))
+                }
             }
 
-            is AgentUpdate.ToolFinished -> updateMessage(assistantId) { message ->
-                val index = message.tools.indexOfLast { it.name == update.name && it.ok == null }
-                if (index < 0) return@updateMessage message
-                val updated = message.tools.toMutableList()
-                updated[index] = updated[index].copy(ok = update.ok, detail = update.detail)
-                message.copy(tools = updated)
+            is AgentUpdate.ToolFinished -> {
+                if (update.name == AgentLoop.THINK_STEP) {
+                    thinkingOpen = false
+                    runPhase = RunPhase.WRITING
+                }
+                finishTool(assistantId, update.name, update.ok, update.detail)
             }
 
             is AgentUpdate.TurnStats -> {
@@ -490,6 +519,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             is AgentUpdate.Progress -> {
+                if (runPhase == RunPhase.PREFILL || runPhase == RunPhase.TOOLS) {
+                    runPhase = if (thinkingOpen) RunPhase.THINKING else RunPhase.WRITING
+                }
                 if (firstTokenAt == 0L) {
                     firstTokenAt = SystemClock.elapsedRealtime()
                     publishMetrics(running = true)
@@ -567,9 +599,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun finishMetrics() {
+    private fun finishMetrics(): RunMetrics {
         metricsJob?.cancel()
         metricsJob = null
+        runPhase = RunPhase.DONE
         val final = publishMetrics(running = false)
         // One line per run, so a benchmark sweep can be scripted off logcat.
         Log.i(
@@ -590,6 +623,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 final.thermalStatus,
             ),
         )
+        return final
     }
 
     private fun publishMetrics(running: Boolean): RunMetrics {
@@ -610,6 +644,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             airplaneMode = snapshot.airplaneMode,
             offline = snapshot.offline,
             thermalStatus = snapshot.thermalStatus,
+            phase = if (running) runPhase else RunPhase.DONE,
         )
         _state.value = _state.value.copy(metrics = metrics)
         return metrics

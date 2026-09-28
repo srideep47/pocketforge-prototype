@@ -48,6 +48,7 @@ object PageSnapshot {
     private const val SETTLE_MS = 700L
 
     private const val FILE_PREFIX = "render_"
+    private const val KEEP_RENDERS = 10
     private const val TAG = "PageSnapshot"
 
     /** Returns the screenshot as a JPEG in [outDir], or null if the page did not render. */
@@ -136,8 +137,12 @@ object PageSnapshot {
 
     private fun save(bitmap: Bitmap, outDir: File): PreparedImage {
         outDir.mkdirs()
-        // Only the latest snapshot is ever looked at; photos in the same folder are kept.
-        outDir.listFiles { file -> file.name.startsWith(FILE_PREFIX) }?.forEach { it.delete() }
+        // Each check's screenshot is shown on its step in the chat, so recent ones are kept;
+        // older ones go. Photos in the same folder are never touched.
+        outDir.listFiles { file -> file.name.startsWith(FILE_PREFIX) }
+            ?.sortedByDescending { it.lastModified() }
+            ?.drop(KEEP_RENDERS - 1)
+            ?.forEach { it.delete() }
         val file = File(outDir, FILE_PREFIX + System.currentTimeMillis() + ".jpg")
         file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
         val image = PreparedImage(file, bitmap.width, bitmap.height)

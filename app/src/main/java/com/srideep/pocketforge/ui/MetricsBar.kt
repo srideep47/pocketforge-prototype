@@ -91,7 +91,7 @@ fun MetricsBar(metrics: RunMetrics, modifier: Modifier = Modifier) {
             } else if (metrics.running) {
                 MetricPill(
                     label = "STATE",
-                    value = "prefilling…",
+                    value = metrics.phase.label,
                     accent = MaterialTheme.colorScheme.primary,
                 )
             }
@@ -160,7 +160,7 @@ fun RunSummaryCard(
     hadSelfCheck: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val isOffline = metrics?.let { it.offline || it.airplaneMode } ?: true
+    val isOffline = metrics?.let { it.offline || it.airplaneMode } ?: false
     val (thermalLabel, thermalColor) = thermalInfo(metrics?.thermalStatus ?: 0)
 
     Column(

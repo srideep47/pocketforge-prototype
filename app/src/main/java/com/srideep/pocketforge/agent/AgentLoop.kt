@@ -238,11 +238,12 @@ class AgentLoop(
         else -> ""
     }
 
-    private companion object {
-        const val TAG = "AgentLoop"
-        val PREVIEW_URL = Regex("""http://localhost:\d+""")
-        const val SITE_ARTIFACT = "<site> artifact"
+    companion object {
+        /** Name of the step that stands for the model's reasoning in a message's tool list. */
         const val THINK_STEP = "think"
-        const val THINK_END = "</think>"
+        private const val TAG = "AgentLoop"
+        private val PREVIEW_URL = Regex("""http://localhost:\d+""")
+        private const val SITE_ARTIFACT = "<site> artifact"
+        private const val THINK_END = "</think>"
     }
 }

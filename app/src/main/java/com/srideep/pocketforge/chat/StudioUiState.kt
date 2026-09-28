@@ -10,6 +10,12 @@ data class ToolTrace(
     val summary: String,
     val ok: Boolean? = null,
     val detail: String = "",
+    /** How long the step took, once it has finished. */
+    val elapsedMs: Long? = null,
+    /** A picture the step produced: the page screenshot a check_render step judged. */
+    val imagePath: String? = null,
+    /** `SystemClock.elapsedRealtime()` when the step started; used to fill [elapsedMs]. */
+    val startedAt: Long = 0L,
 )
 
 data class ChatMessage(
@@ -20,7 +26,20 @@ data class ChatMessage(
     val streaming: Boolean = false,
     /** A photo sent with a user message, shown as a thumbnail above its text. */
     val imagePath: String? = null,
+    /** The finished run's numbers, kept per assistant message so earlier turns keep theirs. */
+    val metrics: RunMetrics? = null,
 )
+
+/** What the agent is doing right now, for a live label while the counters catch up. */
+enum class RunPhase(val label: String) {
+    IDLE("idle"),
+    PREFILL("reading prompt…"),
+    THINKING("thinking…"),
+    WRITING("writing…"),
+    TOOLS("running tools…"),
+    CHECKING("checking render…"),
+    DONE("done"),
+}
 
 enum class ModelStatus { MISSING, LOADING, READY, FAILED }
 
@@ -67,6 +86,11 @@ data class RunMetrics(
     val airplaneMode: Boolean = false,
     val offline: Boolean = false,
     val thermalStatus: Int = 0,
+    /**
+     * Decode tok/s only arrives when a turn ends (MNN counts per `response()`), so during a
+     * turn this is the honest thing to show instead of a throughput that is still zero.
+     */
+    val phase: RunPhase = RunPhase.IDLE,
 )
 
 data class StudioUiState(
