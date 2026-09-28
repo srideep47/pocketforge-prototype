@@ -102,8 +102,12 @@ data class StudioUiState(
     val isListening: Boolean = false,
     /** Dictation sends as soon as speech ends, so a change can be spoken without touching. */
     val handsFree: Boolean = false,
-    /** The coder reasons before it answers. Off by default; changing it reloads the model. */
-    val thinking: Boolean = false,
+    /**
+     * The coder plans before it writes (capped at ~1k tokens). On by default: without it the 4B
+     * wrote bloated pages that ran past the budget; with it a photo-to-app run took 5 minutes.
+     * Changing it reloads the model.
+     */
+    val thinking: Boolean = true,
     val metrics: RunMetrics? = null,
     val modelStatus: ModelStatus = ModelStatus.MISSING,
     val modelName: String? = null,
