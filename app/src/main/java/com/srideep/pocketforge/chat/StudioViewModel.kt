@@ -298,7 +298,13 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         val assistantId = nextMessageId++
         appendMessage(ChatMessage(id = assistantId, role = Role.ASSISTANT, streaming = true))
         attachment = null
-        _state.value = _state.value.copy(input = "", attachedImage = null, isGenerating = true)
+        _state.value = _state.value.copy(
+            input = "",
+            attachedImage = null,
+            isGenerating = true,
+            // Prefill of a photo prompt takes ~25 s; without this the line keeps saying the photo was attached.
+            status = if (image != null) "Reading the photo…" else "Reading your request…",
+        )
 
         runTokens = 0
         runDecodeMicros = 0L
@@ -527,7 +533,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     publishMetrics(running = true)
                 }
                 _state.value = _state.value.copy(
-                    status = "Generating… " + update.charsGenerated + " chars",
+                    status = (if (thinkingOpen) "Thinking… " else "Generating… ") + update.charsGenerated + " chars",
                 )
             }
 
