@@ -835,7 +835,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             val context = getApplication<Application>()
-            val name = SavedApps.titleOf(html) ?: "My app"
+            val name = SavedApps.titleOf(html) ?: nameFromRequest() ?: "My app"
             val screenshot = withContext(Dispatchers.IO) {
                 attachmentsDir.listFiles { file -> file.name.startsWith("render_") }?.maxByOrNull { it.lastModified() }
             }
@@ -845,6 +845,17 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 status = if (asked) "Adding “$name” to your home screen" else "This launcher cannot pin shortcuts",
             )
         }
+    }
+
+    /** "Build a stopwatch with lap times" -> "Stopwatch": the last request's subject, briefly. */
+    private fun nameFromRequest(): String? {
+        val request = _state.value.messages.lastOrNull { it.role == Role.USER }?.text ?: return null
+        val words = request
+            .replace(Regex("(?i)^(please\s+)?(build|create|make|recreate|design|write)\s+(me\s+)?(a|an|the)?\s*"), "")
+            .split(Regex("[^\p{L}\p{N}]+"))
+            .filter { it.isNotEmpty() && it.lowercase() !in NAME_FILLER }
+            .take(2)
+        return words.takeIf { it.isNotEmpty() }?.joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
     }
 
     /**
@@ -903,5 +914,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private companion object {
         const val TAG = "StudioViewModel"
         const val STARTER_NAME = "My Site"
+
+        /** Words that describe the request rather than name the app. */
+        val NAME_FILLER = setOf(
+            "this", "that", "in", "on", "with", "for", "from", "of", "and",
+            "simple", "working", "web", "app", "page", "site", "website", "screenshot", "photo", "like",
+            "dark", "light", "new", "small", "nice", "beautiful", "modern",
+        )
     }
 }

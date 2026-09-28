@@ -42,8 +42,11 @@ object HermesPrompt {
         Interactions must really work, not just look right. The values your script compares
         against must be exactly the ones your controls send: a key labelled × or ÷ either sends
         "*" and "/" or the script handles "×" and "÷". Whatever the user is typing or has
-        produced must be visible on screen at every step. Before writing, trace one real use
+        produced must be visible on screen at every step, and a display starts with a sensible
+        value (a calculator shows 0), never an empty box. Before writing, trace one real use
         through your code; for a calculator, 7 × 8 = must show 7, then 7×8, then 56.
+        Give the document a short <title> naming the app, such as "Calculator": it becomes the
+        app's name on the home screen.
 
         When the user gives no style, make it look like a finished product, not a template:
         the system-ui font stack, a centred column no wider than 960px with 20px side padding,
