@@ -8,6 +8,7 @@
 #include <android/log.h>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <ostream>
@@ -37,6 +38,74 @@ Session* asSession(jlong handle) {
     return reinterpret_cast<Session*>(handle);
 }
 
+// JNI's *StringUTF* functions speak Modified UTF-8, not UTF-8: a 4-byte sequence (any emoji)
+// is invalid to them, and CheckJNI aborts the app on invalid input instead of returning null.
+// MNN produces and consumes real UTF-8, so text crosses the boundary as UTF-16 instead.
+
+constexpr char16_t kReplacement = 0xFFFD;
+
+// Length of the longest prefix of [s] that does not end partway through a code point. A token
+// boundary can split a multi-byte character; the tail waits for the next token to complete it.
+size_t completeUtf8Prefix(const std::string& s) {
+    const size_t n = s.size();
+    for (size_t back = 1; back <= 4 && back <= n; ++back) {
+        const auto c = static_cast<unsigned char>(s[n - back]);
+        if ((c & 0xC0) == 0x80) continue;  // continuation byte: keep looking for the lead
+        const size_t need = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+        return need > back ? n - back : n;
+    }
+    return n;  // only continuation bytes: invalid, let the decoder replace them
+}
+
+std::u16string utf8ToUtf16(const char* s, size_t n) {
+    std::u16string out;
+    out.reserve(n);
+    size_t i = 0;
+    while (i < n) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        size_t len = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 0;
+        uint32_t cp = len == 1 ? c : len == 2 ? (c & 0x1F) : len == 3 ? (c & 0x0F) : (c & 0x07);
+        bool valid = len != 0 && i + len <= n;
+        for (size_t k = 1; valid && k < len; ++k) {
+            const auto cc = static_cast<unsigned char>(s[i + k]);
+            if ((cc & 0xC0) != 0x80) valid = false;
+            cp = (cp << 6) | (cc & 0x3F);
+        }
+        if (!valid || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+            out.push_back(kReplacement);
+            ++i;
+            continue;
+        }
+        if (cp >= 0x10000) {
+            cp -= 0x10000;
+            out.push_back(static_cast<char16_t>(0xD800 + (cp >> 10)));
+            out.push_back(static_cast<char16_t>(0xDC00 + (cp & 0x3FF)));
+        } else {
+            out.push_back(static_cast<char16_t>(cp));
+        }
+        i += len;
+    }
+    return out;
+}
+
+void appendUtf8(std::string& out, uint32_t cp) {
+    if (cp < 0x80) {
+        out.push_back(static_cast<char>(cp));
+    } else if (cp < 0x800) {
+        out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp < 0x10000) {
+        out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else {
+        out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+}
+
 // Streams decoded text out of MNN and into the Kotlin callback. MNN flushes once per
 // decoded token, so one flush == one emission on the Flow.
 class CallbackStreamBuf : public std::streambuf {
@@ -64,13 +133,15 @@ protected:
 
 private:
     void emitPending() {
-        if (mPending.empty()) {
+        const size_t complete = completeUtf8Prefix(mPending);
+        if (complete == 0) {
             return;
         }
-        jstring text = mEnv->NewStringUTF(mPending.c_str());
-        mPending.clear();
+        const std::u16string utf16 = utf8ToUtf16(mPending.data(), complete);
+        mPending.erase(0, complete);
+        jstring text = mEnv->NewString(reinterpret_cast<const jchar*>(utf16.data()),
+                                       static_cast<jsize>(utf16.size()));
         if (text == nullptr) {
-            // Non-UTF8 fragment (a split multi-byte codepoint); drop it rather than throw.
             mEnv->ExceptionClear();
             return;
         }
@@ -92,11 +163,24 @@ std::string toStdString(JNIEnv* env, jstring value) {
     if (value == nullptr) {
         return {};
     }
-    const char* chars = env->GetStringUTFChars(value, nullptr);
-    std::string out(chars != nullptr ? chars : "");
-    if (chars != nullptr) {
-        env->ReleaseStringUTFChars(value, chars);
+    const jsize length = env->GetStringLength(value);
+    const jchar* chars = env->GetStringChars(value, nullptr);
+    if (chars == nullptr) {
+        return {};
     }
+    std::string out;
+    out.reserve(static_cast<size_t>(length));
+    for (jsize i = 0; i < length; ++i) {
+        uint32_t cp = chars[i];
+        if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < length && chars[i + 1] >= 0xDC00 && chars[i + 1] <= 0xDFFF) {
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (chars[i + 1] - 0xDC00);
+            ++i;
+        } else if (cp >= 0xD800 && cp <= 0xDFFF) {
+            cp = kReplacement;  // unpaired surrogate
+        }
+        appendUtf8(out, cp);
+    }
+    env->ReleaseStringChars(value, chars);
     return out;
 }
 
