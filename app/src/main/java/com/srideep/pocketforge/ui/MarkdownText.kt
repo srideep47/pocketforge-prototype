@@ -1,8 +1,11 @@
 package com.srideep.pocketforge.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -11,34 +14,38 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.srideep.pocketforge.ui.theme.CodeColors
 
 /**
- * Just enough Markdown for chat: fenced code blocks, headings, bullets, and inline
- * `code`, **bold** and *italic*. A full parser would be a dependency and a pile of edge
- * cases for output that is mostly prose and code.
+ * Lightweight Markdown renderer for chat: fenced code blocks with syntax highlighting,
+ * headings, bullets, and inline `code`, **bold**, and *italic*.
  */
 @Composable
 fun MarkdownText(text: String, modifier: Modifier = Modifier) {
     val blocks = remember(text) { splitBlocks(text) }
 
-    Column(modifier = modifier) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         blocks.forEach { block ->
             when (block) {
                 is MarkdownBlock.Code -> CodeBlock(block)
                 is MarkdownBlock.Paragraph -> Text(
                     text = inlineMarkdown(block.text),
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.padding(vertical = 2.dp),
                 )
             }
@@ -48,19 +55,54 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun CodeBlock(block: MarkdownBlock.Code) {
-    Text(
-        text = block.code,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 12.sp,
-        color = MaterialTheme.colorScheme.onSurface,
+    val ext = block.language.lowercase().ifBlank { "html" }
+    val highlighted = remember(block.code, ext) {
+        CodeHighlighter.highlight(block.code, "snippet.$ext")
+    }
+    val lineCount = remember(block.code) { block.code.count { it == '\n' } + 1 }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .horizontalScroll(rememberScrollState())
-            .padding(10.dp),
-    )
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.background)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = ext.uppercase(),
+                fontFamily = CodeColors.mono,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = "$lineCount lines",
+                style = CodeColors.tabularMonoStyle,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(
+            text = highlighted,
+            fontFamily = CodeColors.mono,
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(10.dp),
+        )
+    }
 }
 
 private sealed interface MarkdownBlock {
@@ -100,7 +142,6 @@ private fun splitBlocks(source: String): List<MarkdownBlock> {
         }
     }
 
-    // An unterminated fence is normal while a response is still streaming.
     if (inCode && code.isNotBlank()) blocks += MarkdownBlock.Code(language, code.toString().trimEnd())
     flushParagraph()
     return blocks
@@ -122,8 +163,8 @@ private fun inlineMarkdown(source: String): AnnotatedString = buildAnnotatedStri
         }
 
         val base = when {
-            headingLevel == 1 -> SpanStyle(fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            headingLevel > 1 -> SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            headingLevel == 1 -> SpanStyle(fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            headingLevel > 1 -> SpanStyle(fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
             else -> SpanStyle()
         }
 
@@ -133,7 +174,7 @@ private fun inlineMarkdown(source: String): AnnotatedString = buildAnnotatedStri
 
 private val INLINE = Regex("""(\*\*(.+?)\*\*)|(\*(.+?)\*)|(`(.+?)`)""")
 
-private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(line: String) {
+private fun AnnotatedString.Builder.appendInline(line: String) {
     var cursor = 0
     INLINE.findAll(line).forEach { match ->
         if (match.range.first > cursor) append(line.substring(cursor, match.range.first))
@@ -145,7 +186,13 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(line: 
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(match.groupValues[4]) }
 
             match.groupValues[6].isNotEmpty() ->
-                withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append(match.groupValues[6]) }
+                withStyle(
+                    SpanStyle(
+                        fontFamily = CodeColors.mono,
+                        fontWeight = FontWeight.Medium,
+                        color = CodeColors.tag,
+                    ),
+                ) { append(match.groupValues[6]) }
         }
         cursor = match.range.last + 1
     }
