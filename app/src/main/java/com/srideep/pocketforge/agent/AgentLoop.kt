@@ -152,7 +152,10 @@ class AgentLoop(
             // the top and stops in the same place (three turns of that, 16 minutes, no page, on
             // device), so the reply is continued from where it was cut instead.
             var continuations = 0
-            while (reasoning == null && continuations < MAX_CONTINUATIONS && SiteArtifact.isCutOff(rawAssistant)) {
+            while (
+                reasoning == null && continuations < MAX_CONTINUATIONS &&
+                rawAssistant.length < MAX_CONTINUED_CHARS && SiteArtifact.isCutOff(rawAssistant)
+            ) {
                 continuations++
                 emit(AgentUpdate.TurnStats(engine.lastStats()))
                 Log.i(TAG, "turn $iteration: page cut off at ${rawAssistant.length} chars, continuing")
@@ -183,10 +186,32 @@ class AgentLoop(
                     sawMalformed = false
                 }
             }
+            var missedFinds = emptyList<String>()
+            if (pending.isEmpty() && currentPage != null) {
+                val edits = EditArtifact.extract(rawAssistant.toString())
+                if (edits.isNotEmpty()) {
+                    when (val outcome = EditArtifact.apply(currentPage, edits)) {
+                        is EditArtifact.Outcome.Applied -> {
+                            Log.i(TAG, "turn $iteration: applied ${outcome.count} edit(s)")
+                            SiteArtifact.extract("<site>" + outcome.html + "</site>")?.let { html ->
+                                pending += ToolCall(
+                                    name = "create_file",
+                                    arguments = org.json.JSONObject()
+                                        .put("path", "index.html")
+                                        .put("content", html),
+                                    raw = SITE_ARTIFACT,
+                                )
+                                sawMalformed = false
+                            }
+                        }
+                        is EditArtifact.Outcome.Missed -> missedFinds = outcome.finds
+                    }
+                }
+            }
             Log.i(
                 TAG,
                 "turn $iteration: ${streamed} chars streamed, answer ${rawAssistant.length} chars, " +
-                    "calls=${pending.size} malformed=$sawMalformed overBudget=$overBudget",
+                    "calls=${pending.size} malformed=$sawMalformed overBudget=$overBudget missedFinds=${missedFinds.size}",
             )
             conversation += ChatTurn("assistant", rawAssistant.toString())
 
@@ -194,6 +219,11 @@ class AgentLoop(
                 // A turn that produced a broken call is worth one nudge: the model
                 // usually had the right idea and lost the format, and re-prompting is
                 // far cheaper than making the user retype the task.
+                if (missedFinds.isNotEmpty() && incompleteRetries < 2) {
+                    incompleteRetries++
+                    conversation += ChatTurn("user", HermesPrompt.retryAfterMissedEdits(missedFinds))
+                    continue
+                }
                 if (sawMalformed && malformedRetries < 1) {
                     malformedRetries++
                     conversation += ChatTurn("user", HermesPrompt.retryAfterMalformed())
@@ -292,7 +322,14 @@ class AgentLoop(
         private val PREVIEW_URL = Regex("""http://localhost:\d+""")
         private const val SITE_ARTIFACT = "<site> artifact"
         private const val THINK_END = "</think>"
-        private const val MAX_CONTINUATIONS = 2
+        private const val MAX_CONTINUATIONS = 1
+
+        /**
+         * A page this long when cut off is not unfinished but runaway: on device, a calculator
+         * reached 11k characters across two continuations without closing. Asking again is the
+         * better bet.
+         */
+        private const val MAX_CONTINUED_CHARS = 8000
 
         /** Closes a cut-off thought in the model's own voice, so the answer follows naturally. */
         private const val THINK_WRAP_UP = "That is enough planning. I will write the complete page now."

@@ -16,8 +16,8 @@ object HermesPrompt {
         There is no package manager and no network: do not use npm, imports, CDNs, remote
         images, web fonts, or external assets.
 
-        For every website creation or change request, return exactly one complete document
-        using this envelope:
+        For a new website, return exactly one complete document using this envelope (a change
+        to an existing page may use <edit> blocks instead, as its request explains):
 
         <site>
         <!doctype html>
@@ -25,9 +25,12 @@ object HermesPrompt {
         </site>
 
         The content inside <site> is raw HTML, not JSON. Do not escape its quotes or newlines.
-        Do not put it in a Markdown fence. Keep the document under 6,000 characters so it can
-        finish reliably on-device. Include a responsive viewport, accessible labels, polished
-        styling, and working interactions when the request needs them.
+        Do not put it in a Markdown fence. Keep the document under 4,000 characters: it is
+        written one token at a time on a phone, and every extra line is seconds of waiting.
+        Write compact code: no comments, one <style> and one <script>, shared classes instead
+        of styling each element separately, and a CSS grid for any grid of buttons. Include a
+        responsive viewport, accessible labels, polished styling, and working interactions when
+        the request needs them.
 
         Follow the requested scope exactly. The words "just" and "only" are hard constraints:
         the body may contain only the requested visible content. Do not add welcome text,
@@ -93,9 +96,13 @@ object HermesPrompt {
             append(currentPage)
             append("\n</current>\n\n")
             append(
-                "Apply the change below and return the complete updated document inside one " +
-                    "<site></site> block. Keep everything the change does not mention exactly as " +
-                    "it is.\n\nChange: ",
+                "Apply the change below. If it touches only a few places, reply with one block per " +
+                    "place and nothing else:\n<edit>\n<find>lines copied exactly from the current " +
+                    "page</find>\n<replace>the new lines</replace>\n</edit>\nEach find must be copied " +
+                    "character for character and appear only once in the page. If most of the page " +
+                    "changes, return the complete updated document inside one <site></site> block " +
+                    "instead. Keep everything the change does not mention exactly as it is." +
+                    "\n\nChange: ",
             )
         }
         append(request)
@@ -111,6 +118,11 @@ object HermesPrompt {
     fun retryAfterMalformed(): String =
         "The previous output could not be saved. Return one complete raw HTML document inside " +
             "<site></site>, with no JSON, Markdown fence, explanation, or tool call."
+
+    fun retryAfterMissedEdits(finds: List<String>): String =
+        "These <find> texts are not in the current page, so nothing was changed:\n" +
+            finds.joinToString("\n") { "- " + it.lines().first().take(120) } +
+            "\nReturn the complete updated document inside one raw <site></site> block now."
 
     fun retryIncomplete(hasIndex: Boolean): String = if (hasIndex) {
         "The user's requested change was not applied. Return the complete updated index.html " +
