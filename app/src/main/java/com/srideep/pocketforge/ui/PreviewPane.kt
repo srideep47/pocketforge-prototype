@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
@@ -63,6 +64,7 @@ fun PreviewPane(
     onStartServer: () -> Unit,
     onStopServer: () -> Unit,
     modifier: Modifier = Modifier,
+    onAddToHomeScreen: () -> Unit = {},
 ) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -86,6 +88,7 @@ fun PreviewPane(
                 }
             },
             onToggleServer = if (serverRunning) onStopServer else onStartServer,
+            onAddToHomeScreen = onAddToHomeScreen,
         )
 
         if (url == null) {
@@ -185,6 +188,7 @@ private fun AddressBar(
     onReload: () -> Unit,
     onOpenInBrowser: () -> Unit,
     onToggleServer: () -> Unit,
+    onAddToHomeScreen: () -> Unit,
 ) {
     Column {
         Row(
@@ -250,6 +254,18 @@ private fun AddressBar(
                     Icons.Default.Refresh,
                     contentDescription = "Reload",
                     modifier = Modifier.size(19.dp),
+                )
+            }
+            IconButton(
+                onClick = onAddToHomeScreen,
+                enabled = url != null,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    Icons.Default.AddToHomeScreen,
+                    contentDescription = "Add to home screen",
+                    modifier = Modifier.size(19.dp),
+                    tint = MaterialTheme.colorScheme.secondary,
                 )
             }
             IconButton(

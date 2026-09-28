@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.srideep.pocketforge.KeepAliveService
 import com.srideep.pocketforge.agent.AgentLoop
+import com.srideep.pocketforge.apps.SavedApps
 import com.srideep.pocketforge.agent.AgentTools
 import com.srideep.pocketforge.agent.AgentUpdate
 import com.srideep.pocketforge.engine.mnn.MnnLlmEngine
@@ -820,6 +821,30 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 _state.value = _state.value.copy(isListening = false)
             }
         })
+    }
+
+    /**
+     * Keeps the current page as an app of its own and asks the launcher to pin it. The icon is
+     * the page's latest self-check screenshot, so it looks like the app that was built.
+     */
+    fun addToHomeScreen() {
+        val html = currentIndex()
+        if (html.isNullOrBlank()) {
+            _state.value = _state.value.copy(status = "Build a page first")
+            return
+        }
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val name = SavedApps.titleOf(html) ?: "My app"
+            val screenshot = withContext(Dispatchers.IO) {
+                attachmentsDir.listFiles { file -> file.name.startsWith("render_") }?.maxByOrNull { it.lastModified() }
+            }
+            val app = withContext(Dispatchers.IO) { SavedApps.save(context, html, name) }
+            val asked = withContext(Dispatchers.IO) { SavedApps.pin(context, app, screenshot) }
+            _state.value = _state.value.copy(
+                status = if (asked) "Adding “$name” to your home screen" else "This launcher cannot pin shortcuts",
+            )
+        }
     }
 
     /**

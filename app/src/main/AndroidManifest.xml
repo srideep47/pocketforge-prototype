@@ -54,6 +54,14 @@
             </intent-filter>
         </activity>
 
+        <!-- A saved app opened from its home-screen shortcut; each app gets its own task. -->
+        <activity
+            android:name=".apps.AppPlayerActivity"
+            android:exported="false"
+            android:documentLaunchMode="intoExisting"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:theme="@style/Theme.PocketForge" />
+
         <service
             android:name=".KeepAliveService"
             android:exported="false"

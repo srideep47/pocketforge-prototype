@@ -89,6 +89,7 @@ class StudioActions(
     val onDeleteModel: (String) -> Unit,
     val onRefreshModels: () -> Unit,
     val onToggleThinking: () -> Unit = {},
+    val onAddToHomeScreen: () -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -263,6 +264,7 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                         onStartServer = actions.onStartServer,
                         onStopServer = actions.onStopServer,
                         modifier = Modifier.weight(1f),
+                        onAddToHomeScreen = actions.onAddToHomeScreen,
                     )
                 }
             }
