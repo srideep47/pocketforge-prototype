@@ -1,8 +1,13 @@
 package com.srideep.pocketforge.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import com.srideep.pocketforge.chat.ChatMessage
 import com.srideep.pocketforge.chat.ModelEntry
 import com.srideep.pocketforge.chat.ModelInstallState
@@ -47,6 +52,26 @@ private val SampleFiles = listOf(
     WorkspaceEntry("styles.css", "styles.css", isDirectory = false, sizeBytes = 1840L),
     WorkspaceEntry("app.js", "app.js", isDirectory = false, sizeBytes = 2190L),
 )
+
+@Preview(
+    name = "0. PocketForge Brand Logo & Adaptive Emblem",
+    showBackground = true,
+    widthDp = 320,
+    heightDp = 320,
+)
+@Composable
+fun PreviewBrandLogo() {
+    PocketForgeTheme(darkTheme = true) {
+        Surface {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.padding(24.dp),
+            ) {
+                PocketForgeLogo(size = 180.dp)
+            }
+        }
+    }
+}
 
 @Preview(
     name = "1. Empty Chat (Hero & Starters)",

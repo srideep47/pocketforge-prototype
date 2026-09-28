@@ -1,12 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- On-Device Silicon Chip Pins (Top, Bottom, Left, Right) -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M42,38L30,54L42,70L47,64L40,54L47,44Z" />
+        android:fillColor="#FF283548"
+        android:pathData="
+            M43,23h3v5h-3z M52.5,23h3v5h-3z M62,23h3v5h-3z
+            M43,80h3v5h-3z M52.5,80h3v5h-3z M62,80h3v5h-3z
+            M23,43h5v3h-5z M23,52.5h5v3h-5z M23,62h5v3h-5z
+            M80,43h5v3h-5z M80,52.5h5v3h-5z M80,62h5v3h-5z" />
+
+    <!-- Active NPU/MNN Pin Tips (Emerald & Cyan) -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M66,38L61,44L68,54L61,64L66,70L78,54Z" />
+        android:fillColor="#FF38BDF8"
+        android:pathData="M52.5,22h3v2h-3z M22,52.5h2v3h-2z M84,52.5h2v3h-2z" />
+    <path
+        android:fillColor="#FF34D399"
+        android:pathData="M52.5,84h3v2h-3z" />
+
+    <!-- Pocket Silicon Package Frame (Rounded Square) -->
+    <path
+        android:pathData="M36,28L72,28A8,8 0 0,1 80,36L80,72A8,8 0 0,1 72,80L36,80A8,8 0 0,1 28,72L28,36A8,8 0 0,1 36,28Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="28"
+                android:startY="28"
+                android:endX="80"
+                android:endY="80"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF17202E" />
+                <item android:offset="1.0" android:color="#FF0E131C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF2E3D52"
+        android:strokeWidth="1.5"
+        android:pathData="M36,28L72,28A8,8 0 0,1 80,36L80,72A8,8 0 0,1 72,80L36,80A8,8 0 0,1 28,72L28,36A8,8 0 0,1 36,28Z" />
+
+    <!-- Left '<' Code Bracket forming the Anvil Horn -->
+    <path
+        android:fillColor="#FF38BDF8"
+        android:pathData="M44,44L32.5,52L44,60L46.8,56.5L39.5,52L46.8,47.5Z" />
+
+    <!-- Right '>' Code Bracket forming the Anvil Heel -->
+    <path
+        android:fillColor="#FF38BDF8"
+        android:pathData="M64,44L75.5,52L64,60L61.2,56.5L68.5,52L61.2,47.5Z" />
+
+    <!-- Central Blacksmith Anvil Face, Waist & Heavy Base -->
+    <path android:pathData="M43,50.5L65,50.5L62.5,56.5L58.5,59.5L58.5,65L64.5,68.5L64.5,71.5L43.5,71.5L43.5,68.5L49.5,65L49.5,59.5L45.5,56.5Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54"
+                android:startY="50"
+                android:endX="54"
+                android:endY="72"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFF0F6FC" />
+                <item android:offset="0.45" android:color="#FF7DD3FC" />
+                <item android:offset="1.0" android:color="#FF38BDF8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Vision AI Spark / 4-Point Star Rising from the Forge Face -->
+    <path
+        android:fillColor="#FFA78BFA"
+        android:pathData="M54,32.5 C54.9,37.8 56.2,39.1 61.5,40 C56.2,40.9 54.9,42.2 54,47.5 C53.1,42.2 51.8,40.9 46.5,40 C51.8,39.1 53.1,37.8 54,32.5 Z" />
+
+    <!-- On-Device Emerald Core inside the Spark -->
+    <path
+        android:fillColor="#FF34D399"
+        android:pathData="M54,37.8A2.2,2.2 0 1,1 53.99,37.8Z" />
+
+    <!-- Secondary Micro Vision Sparks -->
+    <path
+        android:fillColor="#FFC4B5FD"
+        android:pathData="M44.5,35.5L46,37L44.5,38.5L43,37Z M63.5,35.5L65,37L63.5,38.5L62,37Z" />
 </vector>

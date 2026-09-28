@@ -856,29 +856,44 @@ private fun EmptyChat(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        // On-device hardware pill
+        // Brand Logo + On-device hardware pill
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier
-                .clip(RoundedCornerShape(100))
-                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f))
-                .border(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f), RoundedCornerShape(100))
-                .padding(horizontal = 10.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(
-                imageVector = Icons.Default.WifiOff,
-                contentDescription = null,
-                modifier = Modifier.size(13.dp),
-                tint = MaterialTheme.colorScheme.secondary,
-            )
-            Text(
-                text = "100% ON-DEVICE · MNN ENGINE · ZERO CLOUD",
-                fontFamily = CodeColors.mono,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.secondary,
-            )
+            PocketForgeLogo(size = 48.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100))
+                        .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f))
+                        .border(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f), RoundedCornerShape(100))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.WifiOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.secondary,
+                    )
+                    Text(
+                        text = "100% ON-DEVICE · MNN ENGINE · ZERO CLOUD",
+                        fontFamily = CodeColors.mono,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
+                Text(
+                    text = "POCKETFORGE STUDIO",
+                    fontFamily = CodeColors.mono,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(14.dp))

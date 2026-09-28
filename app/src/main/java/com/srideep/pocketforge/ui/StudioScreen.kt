@@ -136,41 +136,47 @@ fun StudioScreen(state: StudioUiState, actions: StudioActions) {
                             containerColor = MaterialTheme.colorScheme.background,
                         ),
                         title = {
-                            Column {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                                ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                PocketForgeLogo(size = 30.dp)
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                    ) {
+                                        Text(
+                                            text = "PocketForge",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                        )
+                                        Text(
+                                            text = if (isOffline) "OFFLINE" else "LOCAL",
+                                            fontFamily = CodeColors.mono,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.secondary,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f))
+                                                .border(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f),
+                                                    RoundedCornerShape(4.dp),
+                                                )
+                                                .padding(horizontal = 5.dp, vertical = 1.5.dp),
+                                        )
+                                    }
                                     Text(
-                                        text = "PocketForge",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onBackground,
-                                    )
-                                    Text(
-                                        text = if (isOffline) "OFFLINE" else "LOCAL",
-                                        fontFamily = CodeColors.mono,
-                                        fontSize = 9.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f))
-                                            .border(
-                                                1.dp,
-                                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f),
-                                                RoundedCornerShape(4.dp),
-                                            )
-                                            .padding(horizontal = 5.dp, vertical = 1.5.dp),
+                                        text = state.status.ifBlank { "On-device AI studio · local MNN" },
+                                        style = CodeColors.tabularMonoStyle,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                                Text(
-                                    text = state.status.ifBlank { "On-device AI studio · local MNN" },
-                                    style = CodeColors.tabularMonoStyle,
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
                             }
                         },
                         navigationIcon = {

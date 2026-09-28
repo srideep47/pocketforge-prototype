@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Silicon Chip Frame Outline -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:pathData="M36,28L72,28A8,8 0 0,1 80,36L80,72A8,8 0 0,1 72,80L36,80A8,8 0 0,1 28,72L28,36A8,8 0 0,1 36,28Z" />
+
+    <!-- Chip Pins -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="
+            M43,23h3v5h-3z M52.5,23h3v5h-3z M62,23h3v5h-3z
+            M43,80h3v5h-3z M52.5,80h3v5h-3z M62,80h3v5h-3z
+            M23,43h5v3h-5z M23,52.5h5v3h-5z M23,62h5v3h-5z
+            M80,43h5v3h-5z M80,52.5h5v3h-5z M80,62h5v3h-5z" />
+
+    <!-- '<' and '>' Code Bracket Anvil Wings -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M44,44L32.5,52L44,60L46.8,56.5L39.5,52L46.8,47.5Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M64,44L75.5,52L64,60L61.2,56.5L68.5,52L61.2,47.5Z" />
+
+    <!-- Central Anvil Body -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M43,50.5L65,50.5L62.5,56.5L58.5,59.5L58.5,65L64.5,68.5L64.5,71.5L43.5,71.5L43.5,68.5L49.5,65L49.5,59.5L45.5,56.5Z" />
+
+    <!-- Vision Forge Spark -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,32.5 C54.9,37.8 56.2,39.1 61.5,40 C56.2,40.9 54.9,42.2 54,47.5 C53.1,42.2 51.8,40.9 46.5,40 C51.8,39.1 53.1,37.8 54,32.5 Z" />
+</vector>

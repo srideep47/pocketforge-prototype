@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Deep Obsidian Studio Canvas -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="18"
+                android:startY="12"
+                android:endX="90"
+                android:endY="96"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF0F1622" />
+                <item android:offset="0.5" android:color="#FF0A0D12" />
+                <item android:offset="1.0" android:color="#FF070A0E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Subtle Ambient Forge Core Glow -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="54"
+                android:centerY="50"
+                android:gradientRadius="44"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#2E38BDF8" />
+                <item android:offset="0.55" android:color="#14A78BFA" />
+                <item android:offset="1.0" android:color="#000A0D12" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Subtle Silicon Die Grid Lines -->
+    <path
+        android:strokeColor="#1438BDF8"
+        android:strokeWidth="0.6"
+        android:pathData="M27,0L27,108M54,0L54,108M81,0L81,108M0,27L108,27M0,54L108,54M0,81L108,81" />
+</vector>
