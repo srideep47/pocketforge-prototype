@@ -34,6 +34,16 @@ internal class MnnLlmBridge {
         callback: TokenCallback,
     ): Boolean
 
+    /** Like [nativeGenerateChatStream], with the reply's first part already written. */
+    external fun nativeContinueChatStream(
+        handle: Long,
+        roles: Array<String>,
+        contents: Array<String>,
+        assistantPrefix: String,
+        maxNewTokens: Int,
+        callback: TokenCallback,
+    ): Boolean
+
     /**
      * [promptTokens, generatedTokens, prefillMicros, decodeMicros] for the last turn, then
      * visionMicros accumulated since the last history reset.

@@ -286,6 +286,39 @@ Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeGenerateChatStream(
     }) ? JNI_TRUE : JNI_FALSE;
 }
 
+// Continues a reply whose start is given: the conversation goes through the chat template as
+// usual, [jAssistantPrefix] is appended verbatim after the assistant header, and decoding
+// picks up from there. Used to close a reasoning block the model would not end on its own.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeContinueChatStream(
+    JNIEnv* env, jobject, jlong handle, jobjectArray jRoles, jobjectArray jContents,
+    jstring jAssistantPrefix, jint maxNewTokens, jobject callback) {
+    Session* session = asSession(handle);
+    if (session == nullptr || session->llm == nullptr) {
+        return JNI_FALSE;
+    }
+    const auto roles = toStringVector(env, jRoles);
+    const auto contents = toStringVector(env, jContents);
+    if (roles.size() != contents.size() || roles.empty()) {
+        LOGE("invalid chat history: roles=%zu contents=%zu", roles.size(), contents.size());
+        return JNI_FALSE;
+    }
+    MNN::Transformer::ChatMessages messages;
+    messages.reserve(roles.size());
+    for (size_t i = 0; i < roles.size(); ++i) {
+        messages.emplace_back(roles[i], contents[i]);
+    }
+    const std::string prompt =
+        session->llm->apply_chat_template(messages) + toStdString(env, jAssistantPrefix);
+    // The prompt is already templated; a second pass would wrap it as a new user message.
+    session->llm->set_config("{\"use_template\":false}");
+    const bool ok = streamResponse(env, session, callback, [&](std::ostream* out) {
+        session->llm->response(prompt, out, nullptr, maxNewTokens);
+    });
+    session->llm->set_config("{\"use_template\":true}");
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_srideep_pocketforge_engine_mnn_MnnLlmBridge_nativeLastStats(
     JNIEnv* env, jobject, jlong handle) {

@@ -56,6 +56,8 @@ class AgentLoop(
     private val maxNewTokensPerTurn: Int = 2048,
     /** Reasoning comes out of the same budget as the page, and a page alone is ~1.5k tokens. */
     private val maxNewTokensThinking: Int = 8192,
+    /** Reasoning past this (~1k tokens, two minutes on the phone) is cut off; see run(). */
+    private val thinkingBudgetChars: Int = 4000,
 ) {
 
     /**
@@ -97,15 +99,24 @@ class AgentLoop(
             // Reasoning is held back from the parser: it often quotes a <site> or a tool call
             // it is planning, and parsing that would act on the plan instead of the answer.
             var reasoning = if (thinking) StringBuilder() else null
+            var overBudget = false
             if (reasoning != null) emit(AgentUpdate.ToolStarted(THINK_STEP, "Thinking"))
-            engine.generateChat(conversation, maxNewTokens).collect { chunk ->
+
+            suspend fun take(chunk: String) {
                 streamed += chunk.length
                 emit(AgentUpdate.Progress(streamed))
                 var answer = chunk
-                reasoning?.let { thought ->
+                val thought = reasoning
+                if (thought != null) {
                     thought.append(chunk)
                     val end = thought.indexOf(THINK_END)
-                    if (end < 0) return@collect
+                    if (end < 0) {
+                        if (thought.length > thinkingBudgetChars && !overBudget) {
+                            overBudget = true
+                            engine.stop()
+                        }
+                        return
+                    }
                     answer = thought.substring(end + THINK_END.length).trimStart()
                     emit(AgentUpdate.ToolFinished(THINK_STEP, true, thought.substring(0, end).trim().takeLast(400)))
                     reasoning = null
@@ -115,6 +126,21 @@ class AgentLoop(
                     if (event is AgentEvent.Malformed) sawMalformed = true
                     emitEvent(event, pending)
                 }
+            }
+
+            engine.generateChat(conversation, maxNewTokens).collect { take(it) }
+            val cut = reasoning
+            if (overBudget && cut != null) {
+                // Budget forcing: Qwen3.5 left alone reasons for thousands of tokens, about
+                // fifteen minutes on this phone, often without ever reaching the page. Its plan
+                // is complete long before that, so the thought is closed for it and the reply
+                // continues from there as the answer.
+                emit(AgentUpdate.TurnStats(engine.lastStats()))
+                val plan = cut.toString().trimEnd()
+                emit(AgentUpdate.ToolFinished(THINK_STEP, true, plan.takeLast(400)))
+                reasoning = null
+                val prefix = plan + "\n\n" + THINK_WRAP_UP + "\n" + THINK_END + "\n\n"
+                engine.continueChat(conversation, prefix, maxNewTokensPerTurn * 2).collect { take(it) }
             }
             reasoning?.let {
                 // The budget ran out mid-thought; the retry below asks again.
@@ -245,5 +271,8 @@ class AgentLoop(
         private val PREVIEW_URL = Regex("""http://localhost:\d+""")
         private const val SITE_ARTIFACT = "<site> artifact"
         private const val THINK_END = "</think>"
+
+        /** Closes a cut-off thought in the model's own voice, so the answer follows naturally. */
+        private const val THINK_WRAP_UP = "That is enough planning. I will write the complete page now."
     }
 }

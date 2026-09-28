@@ -109,6 +109,34 @@ class MnnLlmEngine {
         awaitClose { bridge.nativeStopGeneration(current) }
     }.buffer(Channel.UNLIMITED)
 
+    /**
+     * Continues the assistant reply to [messages] from [assistantPrefix], which is placed right
+     * after the chat template's assistant header. The prompt is prefilled again in full; MNN's
+     * cache reuse is not relied on, since rolling back linear-attention state is unverified.
+     */
+    fun continueChat(
+        messages: List<ChatTurn>,
+        assistantPrefix: String,
+        maxNewTokens: Int = -1,
+    ): Flow<String> = callbackFlow {
+        val current = handle
+        check(current != 0L) { "no model loaded" }
+        require(messages.isNotEmpty()) { "conversation is empty" }
+
+        val callback = MnnLlmBridge.TokenCallback { token -> trySend(token) }
+        val roles = messages.map { it.role }.toTypedArray()
+        val contents = messages.map { it.content }.toTypedArray()
+
+        launch(dispatcher) {
+            try {
+                bridge.nativeContinueChatStream(current, roles, contents, assistantPrefix, maxNewTokens, callback)
+            } finally {
+                close()
+            }
+        }
+        awaitClose { bridge.nativeStopGeneration(current) }
+    }.buffer(Channel.UNLIMITED)
+
     /** Counters for the most recent turn; zeroes before anything has been generated. */
     fun lastStats(): GenerationStats {
         val current = handle
